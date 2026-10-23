@@ -56,3 +56,18 @@ svg.graph .n-paper{fill:var(--paper)} svg.graph .n-patent{fill:var(--patent)} sv
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.88rem;margin:8px 0}
 .legend i{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:5px}
 .empty{padding:28px;text-align:center;color:var(--muted)}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:16px;align-items:start} @media(max-width:860px){.layout{grid-template-columns:1fr}}
+.facets .card{padding:12px 14px;margin-bottom:12px} .facets h2{font-size:.82rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 6px}
+.facets ul{list-style:none;margin:0;padding:0} .facets li{display:flex;justify-content:space-between;gap:8px;padding:2px 0;font-size:.92rem}
+.bar2{display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px;margin:10px 0}
+.suggest{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:8px 14px}
+.interp{margin:8px 0} .chip.neg{border-color:var(--danger);color:var(--danger)} .chip.flt{border-color:var(--accent);color:var(--accent)}
+details.help summary{cursor:pointer;color:var(--muted)} details.help table{margin-top:8px;font-size:.92rem} details.help td{padding:4px 8px}
+code{background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:.88em}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;overflow:auto;font-size:.88rem}
+.insights h3{font-size:.95rem;margin:1em 0 .3em} .summary{margin:.2em 0;padding-left:1.2em} .summary li{margin:.35em 0}
+svg.chart{width:100%;height:auto} svg.chart .grid{stroke:var(--line)} svg.chart text,svg.graph text.axis{fill:var(--muted);font-size:12px}
+svg.chart .n-paper,svg .n-paper{fill:var(--paper)} svg.chart .n-patent{fill:var(--patent)} svg.chart .n-report{fill:var(--report)} svg.chart .n-drawing{fill:var(--drawing)}
+svg.graph .n-author{fill:var(--accent)}
+.barrow{display:grid;grid-template-columns:minmax(0,9rem) 1fr 2rem;gap:10px;align-items:center;margin:6px 0;font-size:.92rem}
+details summary{cursor:pointer;color:var(--muted);margin-top:8px}

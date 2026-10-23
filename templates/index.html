@@ -2,26 +2,67 @@
 {% block title %}Search{% endblock %}
 {% block body %}
 <form class="card search" method="get" action="{{ url_for('home') }}" role="search">
-  <div class="wide"><input type="search" name="q" value="{{ form.q }}" placeholder="Search papers, patents, reports and drawings" aria-label="Search query" autofocus><button>Search</button></div>
+  <div class="wide"><input type="search" name="q" value="{{ form.q }}" placeholder='Search, e.g.  "posting list"  vibration -sensor  type:patent  year:2020..2023' aria-label="Search query" autofocus><button>Search</button></div>
   <div><label for="type">Type</label>
     <select id="type" name="type"><option value="">All types</option>
       {% for t in doc_types %}<option value="{{ t }}" {{ 'selected' if form.type == t }}>{{ t }}</option>{% endfor %}</select></div>
   <div><label for="yf">Year from</label><input id="yf" type="number" name="year_from" value="{{ form.year_from }}" min="1000" max="2200"></div>
   <div><label for="yt">Year to</label><input id="yt" type="number" name="year_to" value="{{ form.year_to }}" min="1000" max="2200"></div>
   <div><label for="au">Author</label><input id="au" type="text" name="author" value="{{ form.author }}" placeholder="e.g. berg"></div>
+  <div><label for="so">Sort by</label><select id="so" name="sort"><option value="relevance">Relevance</option><option value="year" {{ 'selected' if form.sort == 'year' }}>Newest first</option></select></div>
   <label class="chk"><input type="checkbox" name="all" value="1" {{ 'checked' if form.all }}> all terms</label>
 </form>
+<details class="card help">
+  <summary>Search syntax</summary>
+  <table>
+    <tr><td><code>"posting list"</code></td><td>the exact phrase</td></tr>
+    <tr><td><code>vibration -sensor</code></td><td>documents without the word <em>sensor</em></td></tr>
+    <tr><td><code>type:patent</code></td><td>paper, patent, report or drawing</td></tr>
+    <tr><td><code>author:berg</code> or <code>author:"tomas berg"</code></td><td>author name contains</td></tr>
+    <tr><td><code>keyword:"wind turbine"</code></td><td>has this keyword</td></tr>
+    <tr><td><code>title:gearbox</code></td><td>word must be in the title</td></tr>
+    <tr><td><code>year:2022</code> · <code>year:2020..2023</code> · <code>year:&gt;=2021</code></td><td>publication year</td></tr>
+  </table>
+</details>
 
-{% if results is not none %}
-  <p class="muted">{{ results|length }} result{{ '' if results|length == 1 else 's' }}, ranked by BM25</p>
-  <div class="card">
-  {% for r in results %}
-    <div class="result">
-      <h3><span class="tag t-{{ r.type }}">{{ r.type }}</span><a href="{{ url_for('doc', doc_id=r.doc_id) }}">{{ r.title }}</a><span class="score">score {{ '%.3f'|format(r.score) }}</span></h3>
-      <div class="muted small">{{ r.doc_id }} · {{ r.year or 'n/a' }} · {{ r.authors|join(', ') or 'no authors' }}</div>
-      {% if r.snippet %}<p class="snip">{{ r.snippet|hl }}</p>{% endif %}
+{% if res is not none %}
+  {% if res.suggestion %}<p class="suggest">Did you mean <a href="{{ res.suggestion_href }}"><strong>{{ res.suggestion }}</strong></a>?</p>{% endif %}
+  <div class="chips interp">
+    {% for t in res.query.terms %}<span class="chip">{{ t }}</span>{% endfor %}
+    {% for p in res.query.phrases %}<span class="chip">“{{ p }}”</span>{% endfor %}
+    {% for x in res.query.exclude %}<span class="chip neg">not {{ x }}</span>{% endfor %}
+    {% for f in res.query.filters %}<span class="chip flt">{{ f }}</span>{% endfor %}
+  </div>
+  <div class="bar2">
+    <span class="muted">{{ res.total }} result{{ '' if res.total == 1 else 's' }}{{ ', ranked by BM25' if res.query.terms and form.sort == 'relevance' else '' }}</span>
+    {% if res.total %}<span class="small">Export: <a href="{{ url_for('export', fmt='csv', **base) }}">CSV</a> · <a href="{{ url_for('export', fmt='json', **base) }}">JSON</a> · <a href="{{ url_for('api_search', **base) }}">API</a></span>{% endif %}
+  </div>
+  <div class="layout">
+    <div class="card">
+    {% for r in res.results %}
+      <div class="result">
+        <h3><span class="tag t-{{ r.type }}">{{ r.type }}</span><a href="{{ url_for('doc', doc_id=r.doc_id) }}">{{ r.title }}</a>
+          {% if r.score > 0 %}<span class="score">score {{ '%.3f'|format(r.score) }}</span>{% endif %}</h3>
+        <div class="muted small">{{ r.doc_id }} · {{ r.year or 'n/a' }} · {{ r.authors|join(', ') or 'no authors' }}
+          {% if r.score > 0 and form.q %}· <a href="{{ url_for('explain', doc_id=r.doc_id, q=form.q) }}">why this score?</a>{% endif %}</div>
+        {% if r.snippet %}<p class="snip">{{ r.snippet|hl }}</p>{% endif %}
+      </div>
+    {% else %}<div class="empty">No documents match. Try fewer terms or loosen the filters.</div>{% endfor %}
+    {% if pages > 1 %}
+      <div class="pager">
+        {% if page > 1 %}<a class="btn ghost" href="{{ url_for('home', page=page-1, **base) }}">&larr; Previous</a>{% else %}<span></span>{% endif %}
+        <span class="muted">Page {{ page }} of {{ pages }}</span>
+        {% if page < pages %}<a class="btn ghost" href="{{ url_for('home', page=page+1, **base) }}">Next &rarr;</a>{% else %}<span></span>{% endif %}
+      </div>{% endif %}
     </div>
-  {% else %}<div class="empty">No documents match. Try fewer terms or loosen the filters.</div>{% endfor %}
+    {% if res.total %}
+    <aside class="facets" aria-label="Refine results">
+      {% for g in facets if g['items'] %}
+        <div class="card"><h2>{{ g.title }}</h2>
+          <ul>{% for label, count, href in g['items'] %}<li><a href="{{ href }}">{{ label }}</a><span class="muted">{{ count }}</span></li>{% endfor %}</ul></div>
+      {% endfor %}
+    </aside>
+    {% endif %}
   </div>
 {% else %}
   {% if docs %}

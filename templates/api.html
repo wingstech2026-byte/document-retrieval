@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}API{% endblock %}
+{% block body %}
+<h1>JSON API</h1>
+<p class="muted">Read-only endpoints that return JSON, for scripts and other programs. No key is needed. Errors come back as <code>{"error": "..."}</code> with status 400 or 404.</p>
+<div class="card">
+<table>
+  <thead><tr><th>Endpoint</th><th>What it returns</th></tr></thead>
+  <tbody>
+  <tr><td><code>GET /api/search?q=…</code></td><td>ranked results, total, spelling suggestion and facet counts. Parameters: <code>q</code> (full query syntax), <code>type</code>, <code>year_from</code>, <code>year_to</code>, <code>author</code>, <code>all=1</code>, <code>sort=relevance|year</code>, <code>limit</code> (max 100), <code>offset</code></td></tr>
+  <tr><td><code>GET /api/doc/{id}</code></td><td>metadata and download link; add <code>?text=1</code> for the full text</td></tr>
+  <tr><td><code>GET /api/related/{id}</code></td><td>the most similar documents (<code>limit</code>)</td></tr>
+  <tr><td><code>GET /api/compare?a={id}&amp;b={id}</code></td><td>TF-IDF cosine, shared and distinctive terms, author and keyword overlap</td></tr>
+  <tr><td><code>GET /api/insights/{id}</code></td><td>key terms, extractive summary, reading time</td></tr>
+  <tr><td><code>GET /api/explain/{id}?q=…</code></td><td>BM25 breakdown of a document's score</td></tr>
+  <tr><td><code>GET /api/stats</code></td><td>collection and index statistics</td></tr>
+  <tr><td><code>GET /doc/{id}/file</code></td><td>the original file, byte for byte</td></tr>
+  <tr><td><code>GET /doc/{id}/cite/bibtex</code> (or <code>ris</code>, <code>apa</code>)</td><td>a reference to download</td></tr>
+  <tr><td><code>GET /export?q=…&amp;fmt=csv</code> (or <code>json</code>)</td><td>up to 1000 results as a file</td></tr>
+  </tbody>
+</table>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Example</h2>
+  <pre>curl "{{ base }}/api/search?q=%22posting+list%22&amp;type=patent"</pre>
+  <pre>import requests
+r = requests.get("{{ base }}/api/search", params={"q": "vibration -federated year:&gt;=2022", "limit": 5})
+for hit in r.json()["results"]:
+    print(hit["score"], hit["doc_id"], hit["title"])</pre>
+  <p><a href="{{ url_for('api_search', q='vibration', limit=3) }}">Try it: /api/search?q=vibration&amp;limit=3</a></p>
+</div>
+{% endblock %}

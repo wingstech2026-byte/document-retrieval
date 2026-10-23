@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Why this score?{% endblock %}
+{% block body %}
+<p class="small"><a href="{{ url_for('home', q=q) }}">&larr; Back to results for “{{ q }}”</a></p>
+<h1>Why this score?</h1>
+<div class="card">
+  <p><a href="{{ url_for('doc', doc_id=e.doc_id) }}"><strong>{{ e.title }}</strong></a> <span class="muted small">{{ e.doc_id }}</span></p>
+  <div class="muted small">BM25 score</div>
+  <div class="big">{{ '%.3f'|format(e.score) }}</div>
+  <p class="muted small">The score is the sum of one contribution per query term. A term counts more when it is rare in the collection
+    (higher <em>idf</em>) and when it occurs often in this document, but repeated occurrences count less and less, and long documents are
+    slightly penalised.</p>
+</div>
+<div class="card">
+  <table>
+    <thead><tr><th>Term</th><th class="num">Occurrences in document</th><th class="num">Documents with term</th><th class="num">idf</th><th>Contribution</th></tr></thead>
+    <tbody>
+    {% for r in e.rows %}
+      <tr><td><strong>{{ r.term }}</strong>
+            {% if r.in_title %}<span class="tag">title</span>{% endif %}{% if r.in_keywords %}<span class="tag">keyword</span>{% endif %}</td>
+        <td class="num">{{ r.tf }}</td><td class="num">{{ r.df }} of {{ e.corpus_size }}</td><td class="num">{{ '%.3f'|format(r.idf) }}</td>
+        <td style="min-width:220px"><div class="meter" role="img" aria-label="contribution {{ r.score }}"><i style="width:{{ (r.score / top * 100)|round(1) }}%"></i></div>
+          <span class="small num">{{ '%.3f'|format(r.score) }}{{ '' if r.tf else ' (term absent)' }}</span></td></tr>
+    {% else %}<tr><td colspan="5" class="muted">The query has no ranking terms.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="card small muted">
+  Document length {{ e.doc_length }} (collection average {{ e.avg_length }}). Occurrences are weighted when indexing: a word in the title counts
+  {{ e.title_boost }}×, in a keyword {{ e.keyword_boost }}×, in the abstract or text 1×. Parameters: k1 = {{ e.k1 }}, b = {{ e.b }}.
+  {% if e.query.phrases or e.query.exclude or e.query.filters %}<br>Phrases, exclusions and filters in the query decide <em>which</em> documents are shown; they do not change the score.{% endif %}
+</div>
+{% endblock %}

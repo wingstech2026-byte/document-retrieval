@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Near-duplicates{% endblock %}
+{% block body %}
+<h1>Near-duplicate finder</h1>
+<p class="muted">Pairs of documents whose texts are very alike (TF-IDF cosine similarity). Useful for spotting the same report stored twice or a paper and its preprint.
+  <a href="{{ url_for('graph') }}">See the full similarity graph.</a></p>
+<form class="card search" method="get" action="{{ url_for('duplicates') }}">
+  <div><label for="th">Minimum similarity</label><input id="th" type="number" name="threshold" value="{{ threshold }}" min="0.05" max="1" step="0.05"></div>
+  <div><button>Update</button></div>
+</form>
+<div class="card">
+{% for p in pairs %}
+  <div class="result">
+    <div class="small muted">similarity <strong>{{ '%.3f'|format(p.similarity) }}</strong> · <a href="{{ url_for('compare', a=p.a.id, b=p.b.id) }}">compare in detail</a></div>
+    <div class="meter" role="img" aria-label="similarity {{ '%.0f'|format(p.similarity * 100) }} percent"><i style="width:{{ (p.similarity * 100)|round(1) }}%"></i></div>
+    <p style="margin:.5em 0 0"><span class="tag t-{{ p.a.type }}">{{ p.a.type }}</span><a href="{{ url_for('doc', doc_id=p.a.id) }}">{{ p.a.title }}</a> <span class="muted small">{{ p.a.id }}</span><br>
+      <span class="tag t-{{ p.b.type }}">{{ p.b.type }}</span><a href="{{ url_for('doc', doc_id=p.b.id) }}">{{ p.b.title }}</a> <span class="muted small">{{ p.b.id }}</span></p>
+  </div>
+{% else %}<div class="empty">No pairs reach {{ threshold }}. Lower the threshold to see weaker similarities.</div>{% endfor %}
+</div>
+{% endblock %}

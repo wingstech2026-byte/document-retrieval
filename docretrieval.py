@@ -22,8 +22,10 @@ import mimetypes
 import os
 import re
 import sys
+import time
 import uuid
 from collections import Counter, defaultdict
+from dataclasses import dataclass, field as dc_field
 from datetime import datetime, timezone
 from itertools import groupby
 
@@ -215,6 +217,117 @@ def _safe_filename(name: str) -> str:
 
 
 # --------------------------------------------------------------------------
+# Query language:  "exact phrase"  -excluded  type:patent  author:berg
+#                  keyword:"wind turbine"  title:gearbox  year:2020..2023
+# --------------------------------------------------------------------------
+_QUERY_TOKEN = re.compile(r'(-?)(?:([A-Za-z]+):)?("([^"]*)"|\S+)')
+QUERY_FIELDS = ("type", "author", "keyword", "title", "year")
+
+
+def _norm_words(text: str) -> list[str]:
+    return _TOKEN_RE.findall((text or "").lower())
+
+
+@dataclass
+class ParsedQuery:
+    terms: list = dc_field(default_factory=list)        # stemmed ranking terms
+    phrases: list = dc_field(default_factory=list)      # normalised phrases, must appear verbatim
+    exclude: list = dc_field(default_factory=list)      # stemmed terms that must not appear
+    doc_type: str | None = None
+    authors: list = dc_field(default_factory=list)
+    keywords: list = dc_field(default_factory=list)
+    title_terms: list = dc_field(default_factory=list)
+    year_from: int | None = None
+    year_to: int | None = None
+
+    def describe(self) -> dict:
+        filters = []
+        if self.doc_type:
+            filters.append(f"type: {self.doc_type}")
+        filters += [f"author: {a}" for a in self.authors]
+        filters += [f"keyword: {k}" for k in self.keywords]
+        if self.title_terms:
+            filters.append("title has: " + " ".join(self.title_terms))
+        if self.year_from is not None or self.year_to is not None:
+            filters.append(f"year: {self.year_from if self.year_from is not None else ''}..{self.year_to if self.year_to is not None else ''}")
+        return {"terms": self.terms, "phrases": self.phrases, "exclude": self.exclude, "filters": filters}
+
+
+def _parse_year(value: str) -> tuple[int | None, int | None]:
+    v = value.strip()
+    m = re.fullmatch(r"(\d{4})?\.\.(\d{4})?", v)
+    if m and (m.group(1) or m.group(2)):
+        return (int(m.group(1)) if m.group(1) else None), (int(m.group(2)) if m.group(2) else None)
+    m = re.fullmatch(r"(>=|<=|>|<)?(\d{4})", v)
+    if not m:
+        raise DocError(f"cannot read year filter {value!r}; use year:2022, year:2020..2023, year:>2020 or year:<=2023")
+    op, y = m.group(1), int(m.group(2))
+    return {None: (y, y), ">=": (y, None), ">": (y + 1, None), "<=": (None, y), "<": (None, y - 1)}[op]
+
+
+def parse_query(q: str) -> ParsedQuery:
+    pq = ParsedQuery()
+    for m in _QUERY_TOKEN.finditer(q or ""):
+        neg, fld, body, quoted = m.group(1), (m.group(2) or "").lower(), m.group(3), m.group(4)
+        value = quoted if quoted is not None else body
+        if fld and fld not in QUERY_FIELDS:       # e.g. "http://..." is just text
+            fld, neg, value, quoted = "", "", m.group(0).lstrip("-"), None
+        if fld:
+            if neg:
+                raise DocError("'-' can only be put in front of a plain word, for example -turbine")
+            value = value.strip()
+            if not value:
+                continue
+            if fld == "type":
+                pq.doc_type = _norm_type(value)
+            elif fld == "author":
+                pq.authors.append(value)
+            elif fld == "keyword":
+                pq.keywords.append(value)
+            elif fld == "title":
+                pq.title_terms += tokenize(value)
+            else:
+                lo, hi = _parse_year(value)
+                if lo is not None:
+                    pq.year_from = lo if pq.year_from is None else max(pq.year_from, lo)
+                if hi is not None:
+                    pq.year_to = hi if pq.year_to is None else min(pq.year_to, hi)
+            continue
+        if neg:
+            pq.exclude += tokenize(value)
+        elif quoted is not None:
+            words = _norm_words(value)
+            if words:
+                pq.phrases.append(" ".join(words))
+                pq.terms += tokenize(value)
+        else:
+            pq.terms += tokenize(value)
+    pq.terms = list(dict.fromkeys(pq.terms))
+    pq.exclude = list(dict.fromkeys(pq.exclude))
+    pq.title_terms = list(dict.fromkeys(pq.title_terms))
+    return pq
+
+
+def _edit_distance(a: str, b: str, limit: int) -> int:
+    """Levenshtein distance, giving up (returning limit + 1) once it must exceed `limit`."""
+    if abs(len(a) - len(b)) > limit:
+        return limit + 1
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        if min(cur) > limit:
+            return limit + 1
+        prev = cur
+    return prev[-1]
+
+
+def _bibtex_escape(text: str) -> str:
+    return re.sub(r"([&%$#_{}])", r"\\\1", text or "")
+
+
+# --------------------------------------------------------------------------
 # Engine
 # --------------------------------------------------------------------------
 class DocumentStore:
@@ -227,6 +340,8 @@ class DocumentStore:
         self.postings = self.db["postings"]
         self.meta = self.db["meta"]
         self.fs = gridfs.GridFSBucket(self.db)
+        self._vocab: dict[str, int] | None = None
+        self._vocab_at = 0.0
         if create_indexes:
             self.ensure_indexes()
 
@@ -338,6 +453,7 @@ class DocumentStore:
                 except gridfs.errors.NoFile:
                     pass
             raise
+        self._vocab = None
         return {"doc_id": doc_id, "type": doc_type, "terms": len(terms), "length": record["length"],
                 "file_id": file_id, "size": record["size"]}
 
@@ -370,71 +486,167 @@ class DocumentStore:
                 pass
         self.documents.delete_one({"_id": doc_id})
         self.meta.update_one({"_id": "corpus"}, {"$inc": {"n": -1, "total_len": -doc["length"]}})
+        self._vocab = None
         return {"doc_id": doc_id, "postings_removed": removed, "file_removed": file_removed}
 
     # ---- retrieval --------------------------------------------------------
     def search(self, query: str, doc_type: str | None = None, year_from: int | None = None,
                year_to: int | None = None, author: str | None = None, limit: int = 10,
                require_all: bool = False, snippet: bool = True) -> list[dict]:
-        """BM25-ranked search. Matches documents containing ANY query term (ALL when
-        require_all). Filters: type, year range, author (case-insensitive substring)."""
-        terms = list(dict.fromkeys(tokenize(query)))
+        """BM25-ranked search; returns the best `limit` results (see search_ex for the rest)."""
+        return self.search_ex(query, doc_type, year_from, year_to, author, limit=limit,
+                              require_all=require_all, snippet=snippet)["results"]
+
+    def search_ex(self, query: str, doc_type: str | None = None, year_from: int | None = None,
+                  year_to: int | None = None, author: str | None = None, limit: int = 10, offset: int = 0,
+                  require_all: bool = False, snippet: bool = True, sort: str = "relevance") -> dict:
+        """Full search: results page, total match count, facets, spelling suggestion.
+
+        The query may use "phrases", -exclusions and type:/author:/keyword:/title:/year: filters
+        (see parse_query). The keyword arguments are extra filters that are ANDed with those.
+        Any query term may match (all of them with require_all). sort: relevance | year."""
+        pq = parse_query(query)
+        types = {t for t in (pq.doc_type, _norm_type(doc_type) if doc_type else None) if t}
+        los = [y for y in (pq.year_from, int(year_from) if year_from is not None else None) if y is not None]
+        his = [y for y in (pq.year_to, int(year_to) if year_to is not None else None) if y is not None]
+        lo, hi = (max(los) if los else None), (min(his) if his else None)
+        authors = list(pq.authors) + ([author.strip()] if author and author.strip() else [])
+        out = {"results": [], "total": 0, "query": pq.describe(), "suggestion": None,
+               "facets": {"type": [], "year": [], "author": [], "keyword": []}}
+        has_filters = bool(types or lo is not None or hi is not None or authors or pq.keywords or pq.title_terms)
         n, total_len = self._corpus()
-        if not terms or n == 0:
-            return []
+        if n == 0 or len(types) > 1 or not (pq.terms or has_filters):
+            return out
         avgdl = total_len / n
+
+        flt: dict = {}
+        if types:
+            flt["type"] = next(iter(types))
+        if lo is not None or hi is not None:
+            flt["year"] = {**({"$gte": lo} if lo is not None else {}), **({"$lte": hi} if hi is not None else {})}
+        conds = [{"authors": {"$elemMatch": {"$regex": re.escape(a), "$options": "i"}}} for a in authors]
+        conds += [{"keywords": {"$elemMatch": {"$regex": re.escape(k), "$options": "i"}}} for k in pq.keywords]
+        if conds:
+            flt["$and"] = conds
 
         by_doc: dict[str, dict[str, int]] = defaultdict(dict)
         df: Counter = Counter()
-        for p in self.postings.find({"term": {"$in": terms}}, {"_id": 0}):
-            by_doc[p["doc_id"]][p["term"]] = p["tf"]
-            df[p["term"]] += 1
-        if not by_doc:
-            return []
-        if require_all:
-            by_doc = {d: m for d, m in by_doc.items() if len(m) == len(terms)}
-
-        flt: dict = {"_id": {"$in": list(by_doc)}}
-        if doc_type:
-            flt["type"] = _norm_type(doc_type)
-        if year_from is not None or year_to is not None:
-            flt["year"] = {}
-            if year_from is not None:
-                flt["year"]["$gte"] = int(year_from)
-            if year_to is not None:
-                flt["year"]["$lte"] = int(year_to)
-        if author:
-            flt["authors"] = {"$elemMatch": {"$regex": re.escape(author.strip()), "$options": "i"}}
-        meta = {d["_id"]: d for d in self.documents.find(flt, {"title": 1, "type": 1, "year": 1, "authors": 1, "length": 1})}
+        if pq.terms:
+            for p in self.postings.find({"term": {"$in": pq.terms}}, {"_id": 0}):
+                by_doc[p["doc_id"]][p["term"]] = p["tf"]
+                df[p["term"]] += 1
+            if require_all:
+                by_doc = {d: m for d, m in by_doc.items() if len(m) == len(pq.terms)}
+            if not by_doc:
+                out["suggestion"] = self.suggest(query)
+                return out
+            flt["_id"] = {"$in": list(by_doc)}
+        cur = self.documents.find(flt, {"title": 1, "type": 1, "year": 1, "authors": 1, "keywords": 1, "length": 1})
+        meta = {d["_id"]: d for d in (cur if pq.terms else cur.limit(5000))}
+        if pq.exclude:
+            for gone in self.postings.distinct("doc_id", {"term": {"$in": pq.exclude}}):
+                meta.pop(gone, None)
+        if pq.title_terms:
+            need = set(pq.title_terms)
+            meta = {i: d for i, d in meta.items() if need <= set(tokenize(d["title"]))}
 
         scored = []
         for doc_id, d in meta.items():
-            dl = d["length"] or 1
-            score = 0.0
-            for t, tf in by_doc[doc_id].items():
+            score, dl = 0.0, d["length"] or 1
+            for t, tf in by_doc.get(doc_id, {}).items():
                 idf = math.log(1 + (n - df[t] + 0.5) / (df[t] + 0.5))
                 score += idf * tf * (K1 + 1) / (tf + K1 * (1 - B + B * dl / avgdl))
             scored.append((score, doc_id))
         scored.sort(key=lambda x: (-x[0], x[1]))
-        top = scored[:limit]
 
+        if pq.phrases and scored:  # phrases are verified against the stored text of the best candidates
+            scored = scored[:2000]
+            full = {d["_id"]: d for d in self.documents.find(
+                {"_id": {"$in": [i for _, i in scored]}}, {"title": 1, "abstract": 1, "text": 1})}
+
+            def has_all_phrases(doc_id):
+                d = full[doc_id]
+                hay = " " + " ".join(_norm_words(f"{d['title']} {d.get('abstract', '')} {d.get('text', '')}")) + " "
+                return all(f" {ph} " in hay for ph in pq.phrases)
+            scored = [(sc, i) for sc, i in scored if has_all_phrases(i)]
+        if sort == "year":
+            scored.sort(key=lambda x: (-(meta[x[1]]["year"] or 0), -x[0], x[1]))
+
+        out["total"] = len(scored)
+        facet_src = [meta[i] for _, i in scored]
+        out["facets"] = {
+            "type": Counter(d["type"] for d in facet_src).most_common(),
+            "year": sorted(Counter(d["year"] for d in facet_src if d["year"]).items(), reverse=True),
+            "author": Counter(a for d in facet_src for a in d["authors"]).most_common(8),
+            "keyword": Counter(k for d in facet_src for k in d["keywords"]).most_common(8),
+        }
+        page = scored[max(offset, 0):max(offset, 0) + limit]
         texts = {}
-        if snippet and top:
-            texts = {d["_id"]: d for d in self.documents.find({"_id": {"$in": [i for _, i in top]}}, {"text": 1, "abstract": 1})}
-        qset = set(terms)
-        results = []
-        for score, doc_id in top:
+        if snippet and page:
+            texts = {d["_id"]: d for d in self.documents.find({"_id": {"$in": [i for _, i in page]}}, {"text": 1, "abstract": 1})}
+        qset = set(pq.terms)
+        for score, doc_id in page:
             d = meta[doc_id]
             r = {"doc_id": doc_id, "title": d["title"], "type": d["type"], "year": d["year"],
-                 "authors": d["authors"], "score": round(score, 4), "matched_terms": sorted(by_doc[doc_id])}
+                 "authors": d["authors"], "score": round(score, 4), "matched_terms": sorted(by_doc.get(doc_id, {}))}
             if snippet:
                 src = texts.get(doc_id, {})
                 snip, hits = make_snippet(src.get("text", ""), qset)
                 if hits == 0 and src.get("abstract"):
                     snip = make_snippet(src["abstract"], qset)[0]
                 r["snippet"] = snip
-            results.append(r)
-        return results
+            out["results"].append(r)
+        if pq.terms and (not scored or any(df[t] == 0 for t in pq.terms)):
+            out["suggestion"] = self.suggest(query)
+        return out
+
+    def _vocabulary(self, ttl: float = 60.0) -> dict[str, int]:
+        """term -> document frequency, cached for `ttl` seconds (used for spelling suggestions)."""
+        if self._vocab is None or time.monotonic() - self._vocab_at > ttl:
+            self._vocab = {r["_id"]: r["df"] for r in self.postings.aggregate(
+                [{"$group": {"_id": "$term", "df": {"$sum": 1}}}], allowDiskUse=True)}
+            self._vocab_at = time.monotonic()
+        return self._vocab
+
+    def suggest(self, query: str) -> str | None:
+        """'Did you mean': replace plain query words that occur nowhere in the index by the
+        closest indexed term (edit distance 1, or 2 for longer words; the commoner term wins)."""
+        vocab = self._vocabulary()
+        pieces, last, changed = [], 0, False
+        for m in _QUERY_TOKEN.finditer(query or ""):
+            if m.group(1) or m.group(2) or m.group(3).startswith('"'):
+                continue
+            toks = tokenize(m.group(3))
+            if len(toks) != 1 or len(toks[0]) < 4 or vocab.get(toks[0], 0) > 0:
+                continue
+            tok, limit = toks[0], (1 if len(toks[0]) <= 5 else 2)
+            best = min(((_edit_distance(tok, t, limit), -c, t) for t, c in vocab.items()), default=None)
+            if best and best[0] <= limit:
+                pieces += [query[last:m.start(3)], best[2]]
+                last, changed = m.end(3), True
+        return ("".join(pieces) + query[last:]) if changed else None
+
+    def explain(self, query: str, doc_id: str) -> dict:
+        """Break the BM25 score of one document into its per-term contributions."""
+        pq = parse_query(query)
+        doc = self.get_document(doc_id, with_text=False)
+        n, total_len = self._corpus()
+        avgdl = total_len / n if n else 1.0
+        tfs = {p["term"]: p["tf"] for p in self.postings.find({"doc_id": doc_id, "term": {"$in": pq.terms}}, {"_id": 0})} if pq.terms else {}
+        df = self._df(pq.terms)
+        title_terms, kw_terms = set(tokenize(doc["title"])), {t for k in doc["keywords"] for t in tokenize(k)}
+        dl = doc["length"] or 1
+        norm = K1 * (1 - B + B * dl / avgdl)
+        rows = []
+        for t in pq.terms:
+            tf, d = tfs.get(t, 0), df.get(t, 0)
+            idf = math.log(1 + (n - d + 0.5) / (d + 0.5))
+            part = tf * (K1 + 1) / (tf + norm) if tf else 0.0
+            rows.append({"term": t, "tf": tf, "df": d, "idf": round(idf, 4), "tf_part": round(part, 4),
+                         "score": round(idf * part, 4), "in_title": t in title_terms, "in_keywords": t in kw_terms})
+        return {"doc_id": doc_id, "title": doc["title"], "query": pq.describe(), "rows": rows,
+                "score": round(sum(r["score"] for r in rows), 4), "doc_length": dl, "avg_length": round(avgdl, 1),
+                "corpus_size": n, "k1": K1, "b": B, "title_boost": TITLE_BOOST, "keyword_boost": KEYWORD_BOOST}
 
     # ---- reading ----------------------------------------------------------
     def read(self, doc_id: str, page: int = 1, page_size: int = 1000) -> dict:
@@ -563,20 +775,19 @@ class DocumentStore:
                 "nodes": [{"id": d, "title": v["title"], "type": v["type"], "year": v["year"]} for d, v in sorted(nodes.items())],
                 "edges": edges, "components": components}
 
-    def keyword_cooccurrence(self, min_count: int = 1, keyword: str | None = None,
-                             doc_type: str | None = None, limit: int = 50) -> list[dict]:
-        """Keyword pairs that appear together in the same document, counted with an
-        aggregation pipeline inside MongoDB."""
+    def _pair_counts(self, path: str, min_count: int = 1, only: str | None = None, doc_type: str | None = None,
+                     limit: int = 50) -> list[dict]:
+        """Pairs of values of an array field (keywords, authors) found in the same document,
+        counted by one aggregation pipeline inside MongoDB."""
         match = {"type": _norm_type(doc_type)} if doc_type else {}
         pipeline = [
             {"$match": match},
-            {"$project": {"a": "$keywords", "b": "$keywords"}},
+            {"$project": {"a": f"${path}", "b": f"${path}"}},
             {"$unwind": "$a"}, {"$unwind": "$b"},
             {"$match": {"$expr": {"$lt": ["$a", "$b"]}}},
         ]
-        if keyword:
-            k = keyword.strip().lower()
-            pipeline.append({"$match": {"$or": [{"a": k}, {"b": k}]}})
+        if only:
+            pipeline.append({"$match": {"$or": [{"a": only}, {"b": only}]}})
         pipeline += [
             {"$group": {"_id": {"a": "$a", "b": "$b"}, "count": {"$sum": 1}, "docs": {"$push": "$_id"}}},
             {"$match": {"count": {"$gte": int(min_count)}}},
@@ -585,6 +796,102 @@ class DocumentStore:
         ]
         return [{"a": r["_id"]["a"], "b": r["_id"]["b"], "count": r["count"], "docs": sorted(r["docs"])}
                 for r in self.documents.aggregate(pipeline)]
+
+    def keyword_cooccurrence(self, min_count: int = 1, keyword: str | None = None,
+                             doc_type: str | None = None, limit: int = 50) -> list[dict]:
+        """Keyword pairs that appear together in the same document."""
+        return self._pair_counts("keywords", min_count, keyword.strip().lower() if keyword else None, doc_type, limit)
+
+    def author_network(self, min_count: int = 1, author: str | None = None, limit: int = 60) -> list[dict]:
+        """Co-authorship: author pairs with the number of documents they share."""
+        return self._pair_counts("authors", min_count, author.strip() if author else None, None, limit)
+
+    def analytics(self) -> dict:
+        """Collection overview: documents per year and type, most productive authors, keywords, co-authorship."""
+        by_year: dict[int, dict] = {}
+        for r in self.documents.aggregate([{"$match": {"year": {"$ne": None}}},
+                                           {"$group": {"_id": {"y": "$year", "t": "$type"}, "n": {"$sum": 1}}}]):
+            row = by_year.setdefault(r["_id"]["y"], {"year": r["_id"]["y"], "total": 0, **{t: 0 for t in DOC_TYPES}})
+            row[r["_id"]["t"]] = r["n"]
+            row["total"] += r["n"]
+
+        def top(path, limit):
+            return [(r["_id"], r["n"]) for r in self.documents.aggregate(
+                [{"$unwind": f"${path}"}, {"$group": {"_id": f"${path}", "n": {"$sum": 1}}},
+                 {"$sort": {"n": -1, "_id": 1}}, {"$limit": limit}])]
+        return {"by_year": [by_year[y] for y in sorted(by_year)], "top_authors": top("authors", 30),
+                "top_keywords": top("keywords", 15), "author_edges": self.author_network(limit=60),
+                "documents": self._corpus()[0]}
+
+    def insights(self, doc_id: str, n_terms: int = 10, n_sentences: int = 3) -> dict:
+        """Automatic reading aids: key terms (TF-IDF), a short extractive summary, reading time."""
+        doc = self.get_document(doc_id)
+        n, _ = self._corpus()
+        tfs = self._vectors([doc_id])[doc_id]
+        w = self._tfidf(tfs, n, self._df(tfs))
+        ranked = sorted(w, key=lambda t: (-w[t], t))
+        key_terms = [(t, round(w[t], 3)) for t in ranked[:n_terms]]
+        text = re.sub(r"\s+", " ", doc["text"]).strip()
+        sentences = [x for x in re.split(r"(?<=[.!?])\s+", text) if len(x.split()) >= 6]
+        if len(sentences) <= n_sentences:
+            summary = sentences
+        else:
+            def score(i):
+                toks = set(tokenize(sentences[i]))
+                return sum(w.get(t, 0) for t in toks) / math.sqrt(len(toks) or 1) * (1.2 if i == 0 else 1.0)
+            best = sorted(range(len(sentences)), key=lambda i: -score(i))[:n_sentences]
+            summary = [sentences[i] for i in sorted(best)]
+        have = {t for k in doc["keywords"] for t in tokenize(k)}
+        words = len(text.split())
+        return {"doc_id": doc_id, "key_terms": key_terms, "summary": summary, "words": words,
+                "reading_minutes": max(1, round(words / 200)), "distinct_terms": len(tfs),
+                "suggested_keywords": [t for t, _ in key_terms if t not in have][:5]}
+
+    def find_duplicates(self, threshold: float = 0.6, doc_type: str | None = None) -> list[dict]:
+        """Pairs of documents whose TF-IDF cosine similarity is at least `threshold`."""
+        g = self.similarity_graph(threshold, doc_type)
+        info = {x["id"]: x for x in g["nodes"]}
+        return [{"a": info[e["source"]], "b": info[e["target"]], "similarity": e["weight"]} for e in g["edges"]]
+
+    def citation(self, doc_id: str, fmt: str = "bibtex") -> str:
+        """The document as a BibTeX, RIS or APA-style reference."""
+        d = self.get_document(doc_id, with_text=False)
+        fmt = fmt.lower()
+        if fmt == "bibtex":
+            kind = {"paper": "article", "patent": "misc", "report": "techreport", "drawing": "misc"}[d["type"]]
+            key = re.sub(r"[^A-Za-z0-9]+", "_", doc_id)
+            lines = [f"@{kind}{{{key},"]
+            if d["authors"]:
+                lines.append("  author = {" + " and ".join(_bibtex_escape(a) for a in d["authors"]) + "},")
+            lines.append("  title = {{" + _bibtex_escape(d["title"]) + "}},")
+            if d["year"]:
+                lines.append(f"  year = {{{d['year']}}},")
+            if d["keywords"]:
+                lines.append("  keywords = {" + ", ".join(_bibtex_escape(k) for k in d["keywords"]) + "},")
+            if d["type"] in ("patent", "drawing"):
+                lines.append("  howpublished = {" + ("Patent" if d["type"] == "patent" else "Engineering drawing") + "},")
+            lines.append("}")
+            return "\n".join(lines) + "\n"
+        if fmt == "ris":
+            ty = {"paper": "JOUR", "patent": "PAT", "report": "RPRT", "drawing": "GEN"}[d["type"]]
+            lines = [f"TY  - {ty}", f"ID  - {doc_id}", f"TI  - {d['title']}"]
+            lines += [f"AU  - {a}" for a in d["authors"]]
+            if d["year"]:
+                lines.append(f"PY  - {d['year']}")
+            lines += [f"KW  - {k}" for k in d["keywords"]]
+            if d["abstract"]:
+                lines.append(f"AB  - {d['abstract']}")
+            lines.append("ER  - ")
+            return "\r\n".join(lines) + "\r\n"
+        if fmt == "apa":
+            def initials(name):
+                parts = name.replace(",", " ").split()
+                return f"{parts[-1]}, " + " ".join(p[0].upper() + "." for p in parts[:-1]) if len(parts) > 1 else name
+            names = [initials(a) for a in d["authors"]]
+            who = names[0] if len(names) == 1 else (", ".join(names[:-1]) + ", & " + names[-1] if names else "Anonymous")
+            label = {"paper": "", "patent": " [Patent]", "report": " [Technical report]", "drawing": " [Engineering drawing]"}[d["type"]]
+            return f"{who} ({d['year'] or 'n.d.'}). {d['title']}{label}. {doc_id}.\n"
+        raise DocError(f"unknown citation format {fmt!r}; use bibtex, ris or apa")
 
     # ---- download ---------------------------------------------------------
     def download(self, doc_id: str, dest_dir: str = "downloads") -> dict:
@@ -669,6 +976,48 @@ def render_search(results: list[dict]) -> None:
         print(f"     authors: {', '.join(r['authors']) or '-'}")
         if r.get("snippet"):
             print(f"     {r['snippet']}")
+
+
+def render_search_page(r: dict, offset: int = 0) -> None:
+    q = r["query"]
+    parts = [f"terms: {' '.join(q['terms']) or '-'}"]
+    if q["phrases"]:
+        parts.append("phrases: " + ", ".join(f'"{p}"' for p in q["phrases"]))
+    if q["exclude"]:
+        parts.append("excluding: " + " ".join(q["exclude"]))
+    parts += q["filters"]
+    print(f"{r['total']} match(es)   [{'; '.join(parts)}]")
+    if r["suggestion"]:
+        print(f"Did you mean: {r['suggestion']}")
+    render_search(r["results"]) if r["results"] else print("(no matching documents)")
+    shown = offset + len(r["results"])
+    if r["total"] > shown:
+        print(f"... {r['total'] - shown} more (use --offset {shown})")
+    if r["total"]:
+        f = r["facets"]
+        print("facets  type: " + ", ".join(f"{k}={n}" for k, n in f["type"])
+              + "  | year: " + ", ".join(f"{k}={n}" for k, n in f["year"][:6])
+              + "  | author: " + ", ".join(f"{k}={n}" for k, n in f["author"][:4]))
+
+
+def render_explain(e: dict) -> None:
+    print(f"{e['doc_id']}  {e['title']}")
+    print(f"BM25 score {e['score']:.4f}   (N={e['corpus_size']}, doc length {e['doc_length']}, avg length {e['avg_length']}, k1={e['k1']}, b={e['b']})")
+    print(f"{'term':<14}{'tf':>4}{'df':>4}{'idf':>8}{'tf part':>9}{'score':>9}  where")
+    for r in e["rows"]:
+        where = ", ".join(w for w, on in (("title", r["in_title"]), ("keywords", r["in_keywords"])) if on) or "text"
+        print(f"{r['term']:<14}{r['tf']:>4}{r['df']:>4}{r['idf']:>8.3f}{r['tf_part']:>9.3f}{r['score']:>9.3f}  {where if r['tf'] else 'absent'}")
+    print(f"(tf counts a title occurrence x{e['title_boost']} and a keyword occurrence x{e['keyword_boost']}.)")
+
+
+def render_insights(i: dict) -> None:
+    print(f"{i['doc_id']}: {i['words']} words, about {i['reading_minutes']} min read, {i['distinct_terms']} distinct index terms")
+    print("key terms: " + ", ".join(f"{t} ({w})" for t, w in i["key_terms"]))
+    if i["suggested_keywords"]:
+        print("could be keywords: " + ", ".join(i["suggested_keywords"]))
+    print("summary:")
+    for x in i["summary"]:
+        print(f"  - {x}")
 
 
 def render_read(r: dict) -> None:
@@ -769,8 +1118,38 @@ def cmd_list(st, a):
 
 
 def cmd_search(st, a):
-    res = st.search(" ".join(a.query), a.type, a.year_from, a.year_to, a.author, a.limit, require_all=a.all)
-    render_search(res)
+    r = st.search_ex(" ".join(a.query), a.type, a.year_from, a.year_to, a.author, a.limit, a.offset,
+                     require_all=a.all, sort=a.sort)
+    render_search_page(r, a.offset)
+
+
+def cmd_explain(st, a):
+    render_explain(st.explain(" ".join(a.query), a.doc_id))
+
+
+def cmd_insights(st, a):
+    render_insights(st.insights(a.doc_id, n_sentences=a.sentences))
+
+
+def cmd_cite(st, a):
+    print(st.citation(a.doc_id, a.format), end="")
+
+
+def cmd_duplicates(st, a):
+    pairs = st.find_duplicates(a.threshold)
+    if not pairs:
+        print(f"(no pairs with cosine >= {a.threshold})")
+    for p in pairs:
+        print(f"{p['similarity']:.4f}  {p['a']['id']} {p['a']['title'][:40]}  <->  {p['b']['id']} {p['b']['title'][:40]}")
+
+
+def cmd_authors(st, a):
+    an = st.analytics()
+    print("documents per year: " + ", ".join(f"{r['year']}={r['total']}" for r in an["by_year"]))
+    print("top authors: " + ", ".join(f"{n} ({c})" for n, c in an["top_authors"][:8]))
+    print("co-authorship (pairs sharing documents):")
+    for e in st.author_network(a.min_count, a.author, a.limit):
+        print(f"  {e['count']:>2}  {e['a']} + {e['b']}   ({', '.join(e['docs'])})")
 
 
 def cmd_read(st, a):
@@ -871,6 +1250,24 @@ def cmd_demo(st, a):
     left = st.postings.count_documents({"doc_id": "tmp-demo"})
     print(f"postings still pointing at tmp-demo: {left}")
 
+    _hdr('9. Query language: "exact phrase", -exclusion, field filters')
+    for q in ('"posting list"', "vibration -federated", "type:report year:>=2024", 'keyword:"wind turbine" author:berg fault'):
+        print(f"query: {q}")
+        render_search_page(st.search_ex(q, limit=3, snippet=False))
+        print()
+    _hdr("9b. Spelling suggestion")
+    render_search_page(st.search_ex("gearbxo vibraton", limit=3, snippet=False))
+    _hdr("9c. Why this score? BM25 breakdown of pat-002 for 'vibration sensor'")
+    render_explain(st.explain("vibration sensor", "pat-002"))
+    _hdr("9d. Document insights: pap-003")
+    render_insights(st.insights("pap-003"))
+    _hdr("9e. Citation export: pap-003 as BibTeX")
+    print(st.citation("pap-003", "bibtex"), end="")
+    _hdr("9f. Analytics: authors and co-authorship")
+    cmd_authors(st, argparse.Namespace(min_count=1, author=None, limit=6))
+    _hdr("9g. Near-duplicate check (cosine >= 0.20)")
+    cmd_duplicates(st, argparse.Namespace(threshold=0.20))
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="docretrieval", description="Large-scale document retrieval system on MongoDB + GridFS")
@@ -904,7 +1301,34 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--author", help="case-insensitive substring of an author name")
     s.add_argument("--limit", type=int, default=10)
     s.add_argument("--all", action="store_true", help="require every query term (default: any)")
+    s.add_argument("--offset", type=int, default=0, help="skip this many results (paging)")
+    s.add_argument("--sort", choices=("relevance", "year"), default="relevance")
     s.set_defaults(fn=cmd_search)
+
+    s = sub.add_parser("explain", help="show how the BM25 score of a document is made up for a query")
+    s.add_argument("doc_id")
+    s.add_argument("query", nargs="+")
+    s.set_defaults(fn=cmd_explain)
+
+    s = sub.add_parser("insights", help="key terms, extractive summary and reading time of a document")
+    s.add_argument("doc_id")
+    s.add_argument("--sentences", type=int, default=3)
+    s.set_defaults(fn=cmd_insights)
+
+    s = sub.add_parser("cite", help="print a BibTeX, RIS or APA reference for a document")
+    s.add_argument("doc_id")
+    s.add_argument("--format", choices=("bibtex", "ris", "apa"), default="bibtex")
+    s.set_defaults(fn=cmd_cite)
+
+    s = sub.add_parser("duplicates", help="list near-duplicate document pairs")
+    s.add_argument("--threshold", type=float, default=0.6)
+    s.set_defaults(fn=cmd_duplicates)
+
+    s = sub.add_parser("authors", help="documents per year, top authors and co-authorship")
+    s.add_argument("--min-count", type=int, default=1)
+    s.add_argument("--author")
+    s.add_argument("--limit", type=int, default=20)
+    s.set_defaults(fn=cmd_authors)
 
     s = sub.add_parser("read", help="read a document one page at a time")
     s.add_argument("doc_id")

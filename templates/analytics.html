@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Analytics{% endblock %}
+{% block body %}
+<h1>Collection analytics</h1>
+{% if not an.documents %}<div class="card empty">No documents yet.</div>{% else %}
+<div class="card">
+  <h2 style="margin-top:0">Documents per year</h2>
+  <div class="legend">{% for t in doc_types %}<span><i style="background:var(--{{ t }})"></i>{{ t }}</span>{% endfor %}</div>
+  {% if bars %}
+  <svg class="chart" viewBox="0 0 700 270" role="img" aria-label="Stacked bar chart of documents per year by type; the table below has the numbers">
+    {% for t in ticks %}<line class="grid" x1="44" x2="680" y1="{{ (base_y - t / top * height)|round(1) }}" y2="{{ (base_y - t / top * height)|round(1) }}"/>
+      <text class="axis" x="38" y="{{ (base_y - t / top * height + 4)|round(1) }}" text-anchor="end">{{ t }}</text>{% endfor %}
+    {% for b in bars %}
+      {% for s in b.segs %}<rect class="n-{{ s.type }}" x="{{ b.x }}" y="{{ s.y }}" width="{{ b.w }}" height="{{ s.h }}"><title>{{ b.year }}: {{ s.n }} {{ s.type }}</title></rect>{% endfor %}
+      <text class="axis" x="{{ (b.x + b.w / 2)|round(1) }}" y="{{ base_y + 18 }}" text-anchor="middle">{{ b.year }}</text>
+      <text class="axis" x="{{ (b.x + b.w / 2)|round(1) }}" y="{{ b.top - 5 }}" text-anchor="middle">{{ b.total }}</text>
+    {% endfor %}
+  </svg>
+  <details class="small"><summary>Show as a table</summary>
+    <table><thead><tr><th>Year</th>{% for t in doc_types %}<th class="num">{{ t }}</th>{% endfor %}<th class="num">Total</th></tr></thead><tbody>
+    {% for r in an.by_year %}<tr><td>{{ r.year }}</td>{% for t in doc_types %}<td class="num">{{ r[t] }}</td>{% endfor %}<td class="num">{{ r.total }}</td></tr>{% endfor %}</tbody></table></details>
+  {% else %}<p class="muted">No document has a year.</p>{% endif %}
+</div>
+<div class="grid2">
+  <div class="card"><h2 style="margin-top:0">Most active authors</h2>
+    {% set most = an.top_authors[0][1] if an.top_authors else 1 %}
+    {% for name, n in an.top_authors[:12] %}
+      <div class="barrow"><a href="{{ url_for('home', q='author:"' ~ name ~ '"') }}">{{ name }}</a>
+        <div class="meter"><i style="width:{{ (n / most * 100)|round(1) }}%"></i></div><span class="num">{{ n }}</span></div>
+    {% else %}<p class="muted">No authors recorded.</p>{% endfor %}
+  </div>
+  <div class="card"><h2 style="margin-top:0">Top keywords</h2>
+    <div class="chips">{% for k, n in an.top_keywords %}<a class="chip" href="{{ url_for('keywords', keyword=k) }}">{{ k }} · {{ n }}</a>{% else %}<span class="muted">none</span>{% endfor %}</div>
+    <p class="small muted">Click a keyword to see what it appears with. <a href="{{ url_for('duplicates') }}">Check for near-duplicate documents.</a></p>
+  </div>
+</div>
+<div class="card">
+  <h2 style="margin-top:0">Co-authorship network</h2>
+  <p class="muted small">Authors who share at least one document are joined by a line; thicker lines mean more shared documents and bigger dots mean more documents.</p>
+  {% if net_edges %}
+  <svg class="graph" viewBox="0 0 720 660" role="img" aria-label="Co-authorship network with {{ net_edges|length }} links; the table below lists them">
+    {% for e in net_edges %}<line x1="{{ pos[e.a].x|round(1) }}" y1="{{ pos[e.a].y|round(1) }}" x2="{{ pos[e.b].x|round(1) }}" y2="{{ pos[e.b].y|round(1) }}" stroke-width="{{ 1.5 + e.count * 2 }}" stroke-opacity="0.55"><title>{{ e.a }} + {{ e.b }}: {{ e.count }}</title></line>{% endfor %}
+    {% for name, p in pos.items() %}<a href="{{ url_for('home', q='author:"' ~ name ~ '"') }}"><circle class="n-author" cx="{{ p.x|round(1) }}" cy="{{ p.y|round(1) }}" r="{{ 6 + (counts.get(name, 1) * 1.5) }}"><title>{{ name }}: {{ counts.get(name, 1) }} document(s)</title></circle>
+      <text x="{{ p.lx|round(1) }}" y="{{ p.ly|round(1) }}" text-anchor="{{ p.anchor }}">{{ name }}</text></a>{% endfor %}
+  </svg>
+  <details class="small"><summary>Show as a table</summary>
+    <table><thead><tr><th>Authors</th><th class="num">Shared documents</th><th>Documents</th></tr></thead><tbody>
+    {% for e in net_edges %}<tr><td>{{ e.a }} + {{ e.b }}</td><td class="num">{{ e.count }}</td><td>{% for d in e.docs %}<a href="{{ url_for('doc', doc_id=d) }}">{{ d }}</a>{{ ', ' if not loop.last }}{% endfor %}</td></tr>{% endfor %}</tbody></table></details>
+  {% else %}<p class="muted">No two authors share a document yet.</p>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

@@ -18,6 +18,17 @@
         {% if r.page < r.pages %}<a class="btn ghost" href="{{ url_for('doc', doc_id=d._id, page=r.page+1) }}">Next &rarr;</a>{% else %}<span></span>{% endif %}
       </div>{% endif %}
     </div>
+    <div class="card insights">
+      <h2 style="margin-top:0">At a glance <span class="muted small">· generated automatically</span></h2>
+      <p class="muted small">{{ insights.words }} words · about {{ insights.reading_minutes }} min read · {{ insights.distinct_terms }} distinct index terms</p>
+      {% if insights.summary %}
+        <h3>Summary</h3>
+        <ul class="summary">{% for s in insights.summary %}<li>{{ s }}</li>{% endfor %}</ul>
+      {% endif %}
+      <h3>Key terms</h3>
+      <div class="chips">{% for t, w in insights.key_terms %}<a class="chip" href="{{ url_for('home', q=t) }}" title="TF-IDF weight {{ w }}">{{ t }}</a>{% endfor %}</div>
+      {% if insights.suggested_keywords %}<p class="muted small">Frequent terms not yet listed as keywords: {{ insights.suggested_keywords|join(', ') }}</p>{% endif %}
+    </div>
   </div>
   <aside>
     <div class="card">
@@ -34,6 +45,9 @@
         {% if not read_only %}<form method="post" action="{{ url_for('delete', doc_id=d._id) }}" onsubmit="return confirm('Delete this document, its index entries and its stored file?')">
           <button class="danger">Delete</button></form>{% endif %}
       </div>
+      <p class="small muted" style="margin-bottom:0">Cite:
+        {% for f in cite_formats %}<a href="{{ url_for('cite', doc_id=d._id, fmt=f) }}">{{ {'bibtex': 'BibTeX', 'ris': 'RIS', 'apa': 'APA'}[f] }}</a>{{ ' · ' if not loop.last }}{% endfor %}
+        · <a href="{{ url_for('api_doc', doc_id=d._id) }}">JSON</a></p>
     </div>
     <div class="card">
       <h2 style="margin-top:0">Compare with</h2>

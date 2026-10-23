@@ -15,7 +15,8 @@ inverted index that is itself stored in MongoDB.
 | extras | `delete` (cleans index and GridFS), `stats`, `demo` |
 
 Files: `docretrieval.py` (engine and CLI), `sample_data.py` (10 original sample documents), `test_docretrieval.py` (54 tests),
-`webapp.py` + `app.py` + `templates/` (web site, sections 6 and 7), `test_webapp.py` (19 tests), `requirements.txt`.
+`webapp.py` + `app.py` + `templates/` (web site, sections 6 and 7), `test_webapp.py`, `test_features.py`, `test_webapp_features.py`
+(tests for the web site and the advanced features, section 8), `requirements.txt`.
 
 ## 1. Design
 
@@ -276,7 +277,7 @@ uploaded `.html`) is forced to download. All stored text is HTML-escaped. Delete
 its index entries and its GridFS file. **There is no login**: the server listens on 127.0.0.1 by default, so do not expose it to an untrusted
 network as is. It uses Flask's development server, which is fine for a lab or demo.
 
-`python -m pytest -q` now runs 78 tests (54 engine + 24 web: every page renders, filters and highlighting, paging, byte-identical file download,
+`python -m pytest -q` runs 127 tests (see section 8); the first 78 are (54 engine + 24 web: every page renders, filters and highlighting, paging, byte-identical file download,
 no inline active content, HTML escaping, upload then search then download then delete, validation errors, repeatable sample loading, empty database).
 
 ## 7. Deploying the web site on Vercel
@@ -304,3 +305,56 @@ searching, reading, comparing, the graph, keywords, stats and downloads all work
 
 Vercel limits to know about: request bodies are capped at about 4.5 MB (so large uploads would fail even with writes enabled), and each page
 request is a short-lived function, so the all-pairs similarity graph is meant for small corpora (it is instant for the sample data).
+
+## 8. Advanced features
+
+These are in the engine (`docretrieval.py`), the web site and the command line.
+
+**Query language** (works in the search box, `search` CLI command, `/api/search` and exports):
+
+| Write | Meaning |
+|---|---|
+| `"posting list"` | the words must appear next to each other, in that order |
+| `vibration -sensor` | leave out documents containing *sensor* |
+| `type:patent`, `author:berg`, `author:"tomas berg"` | document type; author name contains |
+| `keyword:"wind turbine"`, `title:gearbox` | has this keyword; word is in the title |
+| `year:2022`, `year:2020..2023`, `year:>=2021`, `year:<2020` | publication year |
+
+Filters can be used on their own (`type:patent year:>2020` lists matching documents) or together with words, and they combine with the
+Type/Year/Author form fields. Phrases are checked against the stored text of the best candidates, so very large result sets cap at 2000 candidates.
+
+| Feature | Web | CLI | What it does |
+|---|---|---|---|
+| Facets | sidebar on the search page | `search` prints counts | counts by type, year, author and keyword over **all** matches; clicking one adds the filter to the query |
+| Paging, sorting | Previous/Next, "Sort by" | `--offset`, `--sort year` | 10 results per page; relevance or newest first |
+| Did you mean | banner above the results | `search` | an indexed word within edit distance 1 (2 for long words) replaces an unknown word; the commoner term wins |
+| Score explanation | "why this score?" link, `/explain/<id>?q=...` | `explain DOC QUERY` | the BM25 score split into one line per term (tf, df, idf, contribution), with the title/keyword weights |
+| Document insights | "At a glance" card | `insights DOC` | key terms by TF-IDF, a 3-sentence extractive summary (sentences scored by the weight of their terms, kept in reading order), reading time, frequent terms missing from the keywords |
+| Analytics | `/analytics` | `authors` | documents per year by type, most active authors, top keywords, co-authorship network (author pairs counted by a MongoDB aggregation) |
+| Near-duplicates | `/duplicates`, and a warning after **Add** | `duplicates --threshold 0.6` | pairs above a cosine threshold; adding a document at 0.6 or more similar to an existing one shows a warning |
+| Citations | BibTeX / RIS / APA links on each document | `cite DOC --format bibtex` | reference text, with BibTeX special characters escaped |
+| Export | CSV / JSON links on the results | | up to 1000 results; CSV cells that start with `= + - @` are prefixed with `'` so spreadsheets do not run them |
+| JSON API | `/api` lists the endpoints | | `/api/search`, `/api/doc/<id>`, `/api/related/<id>`, `/api/compare`, `/api/insights/<id>`, `/api/explain/<id>`, `/api/stats`; errors are JSON |
+
+Examples:
+
+```bash
+python docretrieval.py search '"posting list"'
+python docretrieval.py search vibration -federated type:report year:">=2023"
+python docretrieval.py search gearbxo vibraton            # prints: Did you mean: gearbox vibration
+python docretrieval.py explain pat-002 vibration sensor
+python docretrieval.py insights pap-003
+python docretrieval.py cite pap-003 --format ris
+python docretrieval.py authors
+python docretrieval.py duplicates --threshold 0.2
+curl "http://127.0.0.1:5000/api/search?q=vibration+-federated&limit=3"
+```
+
+(In PowerShell and bash, quote `year:">=2023"` or the shell treats `>` as a redirect.) `python docretrieval.py demo` ends with a section 9 that
+runs these features on the sample data.
+
+Tests: `test_features.py` (28 engine tests: the parser and each operator, phrases, exclusion, facets against the full result set, paging,
+spelling, explain adding up to the real search score, insights, analytics against manual counts, citations, duplicates) and
+`test_webapp_features.py` (21 web tests: facet links, suggestions, pagination, exports including CSV-formula safety, citation downloads,
+analytics and duplicate pages, the add-time warning, the JSON API and its errors, and that the read-only site keeps all of this).
+Breaking the phrase check, the exclusion or the spelling distance on purpose makes the matching test fail.
