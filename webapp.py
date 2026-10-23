@@ -44,10 +44,11 @@ def _float(name: str, default: float) -> float:
         raise dr.DocError(f"{name} must be a number")
 
 
-def create_app(store: dr.DocumentStore) -> Flask:
+def create_app(store: dr.DocumentStore, read_only: bool = False) -> Flask:
     app = Flask(__name__)
     app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
     app.config["STORE"] = store
+    app.config["READ_ONLY"] = read_only
 
     @app.template_filter("hl")
     def highlight(text: str) -> Markup:
@@ -67,6 +68,13 @@ def create_app(store: dr.DocumentStore) -> Flask:
         resp.headers.setdefault("X-Content-Type-Options", "nosniff")
         return resp
 
+    @app.before_request
+    def block_writes():
+        """Read-only mode (public deployments): no uploads, deletes or sample loading."""
+        if read_only and (request.method not in ("GET", "HEAD") or request.endpoint == "add"):
+            return render_template("error.html", message="This site is read-only: documents can be searched, "
+                                   "read, compared and downloaded, but not added or deleted.", code=403), 403
+
     @app.errorhandler(dr.DocError)
     def doc_error(e):
         code = 404 if isinstance(e, dr.NotFound) else 400
@@ -78,7 +86,7 @@ def create_app(store: dr.DocumentStore) -> Flask:
 
     @app.context_processor
     def common():
-        return {"db_name": store.db.name, "doc_types": dr.DOC_TYPES, "msg": request.args.get("msg")}
+        return {"db_name": store.db.name, "doc_types": dr.DOC_TYPES, "msg": request.args.get("msg"), "read_only": read_only}
 
     # ---- search / browse ----------------------------------------------------------
     @app.get("/")

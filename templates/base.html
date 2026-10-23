@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Search{% endblock %} · Document Retrieval</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>{% include "style.css" %}</style>
 </head>
 <body>
 <header class="top"><div class="bar">
@@ -13,13 +13,13 @@
   <nav>
     {% set ep = request.endpoint %}
     <a href="{{ url_for('home') }}" class="{{ 'on' if ep == 'home' }}">Search</a>
-    <a href="{{ url_for('add') }}" class="{{ 'on' if ep == 'add' }}">Add</a>
+    {% if not read_only %}<a href="{{ url_for('add') }}" class="{{ 'on' if ep == 'add' }}">Add</a>{% endif %}
     <a href="{{ url_for('compare') }}" class="{{ 'on' if ep == 'compare' }}">Compare</a>
     <a href="{{ url_for('graph') }}" class="{{ 'on' if ep == 'graph' }}">Similarity graph</a>
     <a href="{{ url_for('keywords') }}" class="{{ 'on' if ep == 'keywords' }}">Keywords</a>
     <a href="{{ url_for('stats') }}" class="{{ 'on' if ep == 'stats' }}">Stats</a>
   </nav>
-  <span class="dbname">db: {{ db_name }}</span>
+  <span class="dbname">{{ "read-only · " if read_only }}db: {{ db_name }}</span>
 </div></header>
 <main>
 {% if msg %}<div class="msg" role="status">{{ msg }}</div>{% endif %}

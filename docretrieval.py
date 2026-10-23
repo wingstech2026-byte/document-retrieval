@@ -218,7 +218,8 @@ def _safe_filename(name: str) -> str:
 # Engine
 # --------------------------------------------------------------------------
 class DocumentStore:
-    def __init__(self, uri: str = DEFAULT_URI, db_name: str = DEFAULT_DB, client: MongoClient | None = None):
+    def __init__(self, uri: str = DEFAULT_URI, db_name: str = DEFAULT_DB, client: MongoClient | None = None,
+                 create_indexes: bool = True):
         self.client = client or MongoClient(uri, serverSelectionTimeoutMS=3000)
         self.client.admin.command("ping")  # fail fast if no server
         self.db = self.client[db_name]
@@ -226,7 +227,8 @@ class DocumentStore:
         self.postings = self.db["postings"]
         self.meta = self.db["meta"]
         self.fs = gridfs.GridFSBucket(self.db)
-        self.ensure_indexes()
+        if create_indexes:
+            self.ensure_indexes()
 
     def ensure_indexes(self) -> None:
         self.postings.create_index([("term", ASCENDING), ("doc_id", ASCENDING)], unique=True, name="term_doc_unique")

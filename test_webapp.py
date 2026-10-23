@@ -176,3 +176,61 @@ def test_load_samples_button_is_repeatable(empty_client, empty_store):  # noqa: 
 def test_empty_database_pages_do_not_crash(empty_client):
     for url in ("/", "/graph", "/keywords", "/stats", "/compare"):
         assert empty_client.get(url).status_code == 200, url
+
+
+# --------------------------------------------------------------------------
+# Read-only mode (public deployments) and the app.py entry point
+# --------------------------------------------------------------------------
+@pytest.fixture
+def ro_client(store):  # noqa: F811
+    app = create_app(store, read_only=True)
+    app.testing = True
+    return app.test_client()
+
+
+def test_read_only_blocks_every_write(ro_client, store):  # noqa: F811
+    assert ro_client.get("/add").status_code == 403
+    assert ro_client.post("/add", data={"title": "x", "type": "paper"}).status_code == 403
+    assert ro_client.post("/doc/pap-001/delete").status_code == 403
+    assert ro_client.post("/load-samples").status_code == 403
+    assert store.documents.count_documents({}) == 10 and store.db["fs.files"].count_documents({}) == 10
+
+
+def test_read_only_hides_write_controls_but_keeps_reading(ro_client):
+    html = text(ro_client.get("/doc/drw-001"))
+    assert "Delete" not in html and "/add" not in html and "read-only" in html
+    assert "Download original" in html
+    assert "pat-001" in text(ro_client.get("/?q=posting+list"))
+    assert ro_client.get("/doc/drw-001/file").status_code == 200
+    assert "0.226" in text(ro_client.get("/compare?a=pap-003&b=rep-002"))
+    assert ro_client.get("/graph").status_code == 200 and ro_client.get("/stats").status_code == 200
+
+
+def test_app_entry_point_without_mongo_uri_explains_itself(monkeypatch):
+    import importlib
+    monkeypatch.delenv("MONGO_URI", raising=False)
+    mod = importlib.reload(importlib.import_module("app"))
+    r = mod.app.test_client().get("/")
+    assert r.status_code == 503 and "MONGO_URI" in r.get_data(as_text=True)
+
+
+def test_app_entry_point_is_read_only_by_default(monkeypatch, mongo_client, store):  # noqa: F811
+    import importlib
+    monkeypatch.setenv("MONGO_URI", "mongodb://localhost:27017")
+    monkeypatch.setenv("DOCRETRIEVAL_DB", store.db.name)
+    monkeypatch.delenv("READ_ONLY", raising=False)
+    mod = importlib.reload(importlib.import_module("app"))
+    c = mod.app.test_client()
+    assert "pat-001" in c.get("/?q=posting+list").get_data(as_text=True)
+    assert c.post("/doc/pat-001/delete").status_code == 403
+    monkeypatch.setenv("READ_ONLY", "0")
+    mod = importlib.reload(mod)
+    assert mod.app.test_client().get("/add").status_code == 200
+
+
+def test_app_entry_point_unreachable_database_is_explained(monkeypatch):
+    import importlib
+    monkeypatch.setenv("MONGO_URI", "mongodb://127.0.0.1:1/?serverSelectionTimeoutMS=300")
+    mod = importlib.reload(importlib.import_module("app"))
+    r = mod.app.test_client().get("/stats")
+    assert r.status_code == 503 and "Could not connect" in r.get_data(as_text=True)

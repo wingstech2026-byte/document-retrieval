@@ -31,8 +31,8 @@
       {% if d.abstract %}<p class="small muted">{{ d.abstract }}</p>{% endif %}
       <div class="actions">
         {% if d.file_id %}<a class="btn" href="{{ url_for('file', doc_id=d._id) }}">Download original</a>{% endif %}
-        <form method="post" action="{{ url_for('delete', doc_id=d._id) }}" onsubmit="return confirm('Delete this document, its index entries and its stored file?')">
-          <button class="danger">Delete</button></form>
+        {% if not read_only %}<form method="post" action="{{ url_for('delete', doc_id=d._id) }}" onsubmit="return confirm('Delete this document, its index entries and its stored file?')">
+          <button class="danger">Delete</button></form>{% endif %}
       </div>
     </div>
     <div class="card">

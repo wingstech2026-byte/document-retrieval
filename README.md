@@ -15,7 +15,7 @@ inverted index that is itself stored in MongoDB.
 | extras | `delete` (cleans index and GridFS), `stats`, `demo` |
 
 Files: `docretrieval.py` (engine and CLI), `sample_data.py` (10 original sample documents), `test_docretrieval.py` (54 tests),
-`webapp.py` + `templates/` + `static/` (web site, section 6), `test_webapp.py` (19 tests), `requirements.txt`.
+`webapp.py` + `app.py` + `templates/` (web site, sections 6 and 7), `test_webapp.py` (19 tests), `requirements.txt`.
 
 ## 1. Design
 
@@ -118,7 +118,7 @@ mkdir C:\mongo-data
 Then install the Python packages:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt        # add: pip install -r requirements-dev.txt  for the tests
 ```
 
 The default connection is `mongodb://localhost:27017`. Override it with `--uri ...` or `$MONGO_URI`; choose the database with
@@ -276,5 +276,31 @@ uploaded `.html`) is forced to download. All stored text is HTML-escaped. Delete
 its index entries and its GridFS file. **There is no login**: the server listens on 127.0.0.1 by default, so do not expose it to an untrusted
 network as is. It uses Flask's development server, which is fine for a lab or demo.
 
-`python -m pytest -q` now runs 73 tests (54 engine + 19 web: every page renders, filters and highlighting, paging, byte-identical file download,
+`python -m pytest -q` now runs 78 tests (54 engine + 24 web: every page renders, filters and highlighting, paging, byte-identical file download,
 no inline active content, HTML escaping, upload then search then download then delete, validation errors, repeatable sample loading, empty database).
+
+## 7. Deploying the web site on Vercel
+
+`app.py` is the entry point Vercel looks for: it exposes the Flask application as `app`, and the stylesheet is inlined into the pages, so no
+static-file setup is needed. Vercel cannot reach a MongoDB running on your own computer, so you need a hosted one, for example a free
+**MongoDB Atlas** cluster.
+
+1. **Atlas**: create a free cluster; add a database user (username and password); under *Network Access* allow `0.0.0.0/0`
+   (Vercel's IP addresses change, so a fixed allow-list does not work); copy the connection string
+   (`mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/`).
+2. **Load the data from your own computer** (this also creates the indexes):
+   ```bash
+   python docretrieval.py --uri "mongodb+srv://USER:PASSWORD@CLUSTER.mongodb.net/" --db docretrieval demo
+   ```
+   The demo loads the 10 sample documents into the database named by `--db` (here `docretrieval`; without `--db` it uses `docretrieval_demo`).
+   Use `add` with your own files for real data.
+3. **Vercel**: import the GitHub repository, then in *Settings, Environment Variables* add
+   `MONGO_URI` (the connection string) and `DOCRETRIEVAL_DB` (the same database name as step 2), and redeploy.
+4. If something is missing or wrong, the site shows a "Setup needed" page that says what (no `MONGO_URI`, or cannot connect).
+
+**The site is read-only by default.** There is no login, so on a public URL anyone could otherwise upload or delete documents. With
+`READ_ONLY=1` (the default) the Add page, Delete buttons and sample loader are removed and every write request is refused (HTTP 403);
+searching, reading, comparing, the graph, keywords, stats and downloads all work. Set `READ_ONLY=0` only for a private deployment.
+
+Vercel limits to know about: request bodies are capped at about 4.5 MB (so large uploads would fail even with writes enabled), and each page
+request is a short-lived function, so the all-pairs similarity graph is meant for small corpora (it is instant for the sample data).

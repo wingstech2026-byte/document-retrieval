@@ -1,5 +1,4 @@
 pymongo>=4.6
 flask>=3.0
-pytest>=7
 # optional: text extraction from PDF files added with --file
 pypdf>=4

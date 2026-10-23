@@ -34,8 +34,9 @@
   </table></div>
   {% else %}
   <div class="card empty"><p><strong>No documents yet.</strong></p>
+    {% if read_only %}<p>This database is empty. Load data with the command-line tool (see the README).</p>{% else %}
     <form method="post" action="{{ url_for('load_samples') }}" style="display:inline"><button>Load the 10 sample documents</button></form>
-    <a class="btn ghost" href="{{ url_for('add') }}">Add your own</a></div>
+    <a class="btn ghost" href="{{ url_for('add') }}">Add your own</a>{% endif %}</div>
   {% endif %}
 {% endif %}
 {% endblock %}
