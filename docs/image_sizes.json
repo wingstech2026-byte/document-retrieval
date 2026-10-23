@@ -1,0 +1,174 @@
+{
+ "docs/screenshots/01_home_documents.png": [
+  1800,
+  1100
+ ],
+ "docs/screenshots/02_search_bm25.png": [
+  1280,
+  800
+ ],
+ "docs/screenshots/03_advanced_query_facets.png": [
+  1800,
+  1125
+ ],
+ "docs/screenshots/04_did_you_mean.png": [
+  1800,
+  1125
+ ],
+ "docs/screenshots/05_document_drawing.png": [
+  1800,
+  1400
+ ],
+ "docs/screenshots/06_document_paper_insights.png": [
+  1800,
+  1500
+ ],
+ "docs/screenshots/07_compare.png": [
+  1800,
+  1400
+ ],
+ "docs/screenshots/08_similarity_graph.png": [
+  1721,
+  1579
+ ],
+ "docs/screenshots/09_explain_score.png": [
+  1800,
+  1500
+ ],
+ "docs/screenshots/10_analytics.png": [
+  1800,
+  1900
+ ],
+ "docs/screenshots/11_stats.png": [
+  1800,
+  1250
+ ],
+ "docs/screenshots/12_api_docs.png": [
+  1800,
+  1300
+ ],
+ "docs/screenshots/12_api_json.png": [
+  1280,
+  1000
+ ],
+ "docs/screenshots/13_add_document.png": [
+  1280,
+  1000
+ ],
+ "docs/code/c01_tokenize_index_terms.png": [
+  1216,
+  596
+ ],
+ "docs/code/c02_indexes.png": [
+  1567,
+  212
+ ],
+ "docs/code/c03_add_document_write.png": [
+  1380,
+  688
+ ],
+ "docs/code/c04a_fetch_postings.png": [
+  1099,
+  284
+ ],
+ "docs/code/c04b_bm25_scoring.png": [
+  1073,
+  236
+ ],
+ "docs/code/c05a_tfidf_compare.png": [
+  1333,
+  332
+ ],
+ "docs/code/c05b_cosine.png": [
+  813,
+  212
+ ],
+ "docs/code/c06_aggregation_pipeline.png": [
+  1359,
+  380
+ ],
+ "docs/code/c07_delete_document.png": [
+  1255,
+  404
+ ],
+ "docs/code/c08_download_stream.png": [
+  969,
+  380
+ ],
+ "docs/code/c09_vercel_entry.png": [
+  1452,
+  251
+ ],
+ "docs/code/d01_documents_record.png": [
+  1364,
+  642
+ ],
+ "docs/code/d02_postings_records.png": [
+  824,
+  212
+ ],
+ "docs/code/d03_gridfs_records.png": [
+  812,
+  504
+ ],
+ "docs/code/d04_indexes.png": [
+  776,
+  297
+ ],
+ "docs/code/t01_cli_search.png": [
+  1460,
+  274
+ ],
+ "docs/code/t02_cli_compare.png": [
+  1460,
+  274
+ ],
+ "docs/code/t03_cli_graph.png": [
+  608,
+  435
+ ],
+ "docs/code/t04_cli_cooccur.png": [
+  812,
+  251
+ ],
+ "docs/code/t05_cli_explain.png": [
+  956,
+  205
+ ],
+ "docs/code/t06_delete_cleanup.png": [
+  992,
+  182
+ ],
+ "docs/code/t07_tests.png": [
+  993,
+  188
+ ],
+ "docs/diagrams/architecture.png": [
+  1540,
+  850
+ ],
+ "docs/diagrams/er_diagram.png": [
+  1540,
+  880
+ ],
+ "docs/diagrams/flow_search.png": [
+  1608,
+  378
+ ],
+ "docs/diagrams/flow_store.png": [
+  1608,
+  378
+ ],
+ "docs/figures/bench_index_effect.png": [
+  1480,
+  840
+ ],
+ "docs/figures/bench_scaling_functions.png": [
+  1640,
+  880
+ ],
+ "docs/figures/bench_search_latency.png": [
+  1640,
+  920
+ ]
+}

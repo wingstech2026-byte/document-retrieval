@@ -1,0 +1,141 @@
+{
+ "documents": 10000,
+ "python": "3.12.10",
+ "os": "Windows-11-10.0.26300-SP0",
+ "mongo": "8.0.34",
+ "ingest": {
+  "total_s": 51.6,
+  "docs_per_s": 193.6,
+  "median_ms": 4.79,
+  "p95_ms": 6.62,
+  "max_ms": 80.02
+ },
+ "size": {
+  "postings": 986895,
+  "distinct_terms": 657,
+  "gridfs_files": 10000,
+  "gridfs_mb": 10.7,
+  "data_mb": 96.5,
+  "index_mb": 38.6,
+  "avg_doc_length": 209.0
+ },
+ "term_df": {
+  "frequent_df": [
+   10000,
+   8944
+  ],
+  "medium_df": [
+   814,
+   856
+  ],
+  "rare_df": [
+   397,
+   570
+  ]
+ },
+ "queries": {
+  "search, 2 frequent terms": {
+   "n": 100,
+   "median_ms": 180.67,
+   "p95_ms": 219.82,
+   "max_ms": 242.47
+  },
+  "search, 2 medium terms": {
+   "n": 100,
+   "median_ms": 27.34,
+   "p95_ms": 40.42,
+   "max_ms": 42.96
+  },
+  "search, 2 rare terms": {
+   "n": 100,
+   "median_ms": 18.79,
+   "p95_ms": 23.31,
+   "max_ms": 29.88
+  },
+  "search, 1 frequent + 2 rare terms": {
+   "n": 100,
+   "median_ms": 151.81,
+   "p95_ms": 195.67,
+   "max_ms": 210.34
+  },
+  "search with type and year filters": {
+   "n": 100,
+   "median_ms": 63.58,
+   "p95_ms": 79.24,
+   "max_ms": 88.03
+  },
+  "search with author filter": {
+   "n": 100,
+   "median_ms": 88.49,
+   "p95_ms": 118.24,
+   "max_ms": 127.11
+  },
+  "phrase search (2 medium terms)": {
+   "n": 100,
+   "median_ms": 88.24,
+   "p95_ms": 117.82,
+   "max_ms": 428.22
+  }
+ },
+ "other": {
+  "related documents": {
+   "n": 30,
+   "median_ms": 665.55,
+   "p95_ms": 764.34,
+   "max_ms": 790.11
+  },
+  "compare two documents": {
+   "n": 30,
+   "median_ms": 184.34,
+   "p95_ms": 204.92,
+   "max_ms": 209.85
+  },
+  "read one page": {
+   "n": 40,
+   "median_ms": 0.36,
+   "p95_ms": 0.5,
+   "max_ms": 0.67
+  },
+  "download (GridFS + SHA-256)": {
+   "n": 30,
+   "median_ms": 2.52,
+   "p95_ms": 3.0,
+   "max_ms": 3.86
+  },
+  "keyword co-occurrence (whole collection)": {
+   "n": 5,
+   "median_ms": 217.11,
+   "p95_ms": 223.5,
+   "max_ms": 252.34
+  },
+  "statistics": {
+   "n": 3,
+   "median_ms": 639.27,
+   "p95_ms": 639.27,
+   "max_ms": 680.22
+  }
+ },
+ "index_effect": {
+  "term": "clamping",
+  "matching_postings": 10000,
+  "with_index_ms": 29.25,
+  "collection_scan_ms": 422.05,
+  "same_result": true,
+  "plan_uses_index": true,
+  "total_postings": 986895,
+  "rare_term_postings": 507,
+  "rare_with_index_ms": 3.63,
+  "rare_collection_scan_ms": 479.37
+ },
+ "delete": {
+  "n": 100,
+  "median_ms": 4.12,
+  "p95_ms": 7.35,
+  "max_ms": 10.29,
+  "postings_before": 986895,
+  "postings_after": 977081,
+  "files_before": 10000,
+  "files_after": 9900,
+  "orphans": 0
+ }
+}

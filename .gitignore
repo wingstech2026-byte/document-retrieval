@@ -5,3 +5,5 @@ downloads/
 *.pyc
 .env
 .venv/
+~$*
+downloads_bench/

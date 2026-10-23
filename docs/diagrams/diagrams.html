@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Diagrams</title>
+<style>
+  body{margin:0;background:#fff;font-family:"Segoe UI",Arial,sans-serif;color:#12303f}
+  section{padding:24px;display:inline-block}
+  svg{display:block;background:#fff}
+  .mono{font-family:Consolas,"Courier New",monospace}
+</style>
+</head>
+<body>
+<section id="er-wrap"><svg id="er" width="1500" height="780" viewBox="0 0 1500 780"></svg></section><br>
+<section id="arch-wrap"><svg id="arch" width="1500" height="740" viewBox="0 0 1500 740"></svg></section><br>
+<section id="store-wrap"><svg id="store" width="1560" height="330" viewBox="0 0 1560 330"></svg></section><br>
+<section id="search-wrap"><svg id="search" width="1560" height="330" viewBox="0 0 1560 330"></svg></section>
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const INK = "#12303f", MUTED = "#5b7280", TEAL = "#0e7c7b", AMBER = "#d98a1c", BLUE = "#2f6fbd", GREY = "#6b7c86";
+
+function el(svg, name, attrs, text) {
+  const e = document.createElementNS(NS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text !== undefined) e.textContent = text;
+  svg.appendChild(e);
+  return e;
+}
+function arrowDefs(svg) {
+  const d = el(svg, "defs", {});
+  const m = document.createElementNS(NS, "marker");
+  m.setAttribute("id", svg.id + "-arrow"); m.setAttribute("markerWidth", 10); m.setAttribute("markerHeight", 10);
+  m.setAttribute("refX", 8); m.setAttribute("refY", 5); m.setAttribute("orient", "auto");
+  const p = document.createElementNS(NS, "path"); p.setAttribute("d", "M0,0 L10,5 L0,10 z"); p.setAttribute("fill", INK);
+  m.appendChild(p); d.appendChild(m);
+}
+function line(svg, x1, y1, x2, y2, opts = {}) {
+  el(svg, "line", {x1, y1, x2, y2, stroke: opts.color || INK, "stroke-width": opts.w || 2.2,
+    "stroke-dasharray": opts.dash || "", "marker-end": opts.arrow ? `url(#${svg.id}-arrow)` : ""});
+}
+function label(svg, x, y, t, o = {}) {
+  el(svg, "text", {x, y, "text-anchor": o.anchor || "middle", "font-size": o.size || 15, fill: o.color || MUTED,
+    "font-weight": o.bold ? 700 : 400, "font-style": o.italic ? "italic" : "normal", "font-family": o.mono ? "Consolas,monospace" : "Segoe UI,Arial,sans-serif"}, t);
+}
+function pill(svg, x, y, t) {  // cardinality marker with a white backing
+  const w = t.length * 9 + 14;
+  el(svg, "rect", {x: x - w / 2, y: y - 12, width: w, height: 22, rx: 11, fill: "#fff", stroke: INK, "stroke-width": 1.4});
+  label(svg, x, y + 4, t, {color: INK, bold: true, size: 14});
+}
+
+/* ------------------------------ ER diagram ------------------------------ */
+const er = document.getElementById("er");
+arrowDefs(er);
+const ROW = 27;
+function entity(x, y, w, title, sub, color, rows, dashed) {
+  const h = 62 + rows.length * ROW;
+  el(er, "rect", {x, y, width: w, height: h, rx: 10, fill: "#fff", stroke: color, "stroke-width": 2.6, "stroke-dasharray": dashed ? "8 6" : ""});
+  el(er, "path", {d: `M${x},${y + 52} V${y + 10} Q${x},${y} ${x + 10},${y} H${x + w - 10} Q${x + w},${y} ${x + w},${y + 10} V${y + 52} Z`, fill: dashed ? "#eef3f5" : color});
+  label(er, x + 16, y + 26, title, {anchor: "start", size: 19, bold: true, color: dashed ? INK : "#fff"});
+  label(er, x + 16, y + 45, sub, {anchor: "start", size: 12.5, color: dashed ? MUTED : "#e4f3f2", mono: true});
+  rows.forEach((r, i) => {
+    const ty = y + 52 + 22 + i * ROW;
+    if (r.key) {
+      el(er, "rect", {x: x + 12, y: ty - 16, width: 30, height: 19, rx: 4, fill: r.key === "PK" ? "#fff2d6" : "#e3ecf8", stroke: r.key === "PK" ? AMBER : BLUE});
+      label(er, x + 27, ty - 2, r.key, {size: 12, bold: true, color: r.key === "PK" ? "#8a5200" : "#1f4f95"});
+    }
+    label(er, x + (r.key ? 52 : 16), ty, r.f, {anchor: "start", size: 15, color: INK, mono: true, bold: !!r.key});
+    if (r.n) label(er, x + w - 14, ty, r.n, {anchor: "end", size: 12.5, color: MUTED});
+  });
+  return {x, y, w, h};
+}
+label(er, 750, 34, "Entity-relationship diagram: how documents, index and files are stored in MongoDB", {size: 22, bold: true, color: INK});
+
+const files = entity(40, 80, 380, "fs.files", "GridFS: one record per stored file", GREY, [
+  {key: "PK", f: "_id : ObjectId"}, {f: "filename : string"}, {f: "length : int", n: "bytes"}, {f: "chunkSize : int", n: "255 KB"},
+  {f: "uploadDate : date"}, {f: "metadata : {doc_id, ...}", n: "link back"}]);
+const chunks = entity(40, 400, 380, "fs.chunks", "GridFS: the file's bytes in pieces", GREY, [
+  {key: "PK", f: "_id : ObjectId"}, {key: "FK", f: "files_id : ObjectId", n: "to fs.files"}, {f: "n : int", n: "piece number"}, {f: "data : binary"}]);
+const docs = entity(520, 80, 430, "documents", "one record per document (any of the 4 types)", TEAL, [
+  {key: "PK", f: "_id : string", n: "'pat-001'"}, {f: "title : string"}, {f: "type : string", n: "paper|patent|report|drawing"}, {f: "year : int"},
+  {f: "abstract, text : string", n: "searchable text"}, {f: "authors : [string]", n: "embedded list"}, {f: "keywords : [string]", n: "embedded list"},
+  {f: "length : int", n: "weighted terms"}, {key: "FK", f: "file_id : ObjectId", n: "to fs.files"}, {f: "filename, content_type, size"},
+  {f: "sha256 : string", n: "integrity check"}, {f: "added_at : date"}]);
+const posts = entity(1090, 80, 370, "postings", "inverted index: one record per (term, doc)", AMBER, [
+  {key: "PK", f: "(term, doc_id)", n: "UNIQUE index"}, {f: "term : string", n: "'index'"}, {key: "FK", f: "doc_id : string", n: "to documents"}, {f: "tf : number", n: "weighted count"}]);
+const terms = entity(1090, 330, 370, "TERM (derived)", "no collection: counted from postings", GREY, [
+  {f: "term : string"}, {f: "df : int", n: "documents containing it"}], true);
+const meta = entity(1090, 510, 370, "meta", "one record: collection statistics", GREY, [
+  {key: "PK", f: "_id : 'corpus'"}, {f: "n : int", n: "number of documents"}, {f: "total_len : int", n: "sum of lengths"}]);
+const auth = entity(520, 560, 200, "AUTHOR", "embedded in documents", GREY, [{f: "name : string"}], true);
+const kw = entity(750, 560, 200, "KEYWORD", "embedded in documents", GREY, [{f: "text : string", n: ""}], true);
+
+// relationships
+line(er, 520, 160, 420, 160); pill(er, 487, 138, "0..1"); pill(er, 436, 138, "1");
+label(er, 470, 186, "keeps the", {size: 13}); label(er, 470, 203, "original file", {size: 13});
+line(er, 230, 296, 230, 400); pill(er, 230, 322, "1"); pill(er, 230, 376, "1..N"); label(er, 242, 355, "is split into", {anchor: "start", size: 14});
+line(er, 950, 160, 1090, 160); pill(er, 975, 140, "1"); pill(er, 1066, 140, "0..N"); label(er, 1020, 190, "is indexed by", {size: 14});
+line(er, 1275, 244, 1275, 330); pill(er, 1275, 266, "N"); pill(er, 1275, 308, "1"); label(er, 1287, 292, "occurs in", {anchor: "start", size: 14});
+line(er, 620, 472 + 0, 620, 560, {dash: "7 5"}); pill(er, 620, 494, "N"); pill(er, 620, 538, "M"); label(er, 632, 520, "written by", {anchor: "start", size: 14});
+line(er, 850, 472, 850, 560, {dash: "7 5"}); pill(er, 850, 494, "N"); pill(er, 850, 538, "M"); label(er, 862, 520, "tagged with", {anchor: "start", size: 14});
+line(er, 950, 420, 1090, 560, {dash: "7 5"}); label(er, 1024, 486, "counted in", {anchor: "start", size: 14});
+label(er, 750, 690, "Solid boxes are MongoDB collections. Dashed boxes are not separate collections: authors and keywords are lists inside each document,", {size: 15});
+label(er, 750, 712, "and terms are the keys of the postings. This is the usual document-database choice: embed what is always read together.", {size: 15});
+er.setAttribute("height", 740); er.setAttribute("viewBox", "0 0 1500 740");
+
+/* ------------------------------ architecture ------------------------------ */
+const ar = document.getElementById("arch");
+arrowDefs(ar);
+function node(svg, x, y, w, h, title, sub, o = {}) {
+  el(svg, "rect", {x, y, width: w, height: h, rx: 12, fill: o.fill || "#fff", stroke: o.stroke || INK, "stroke-width": 2.4, "stroke-dasharray": o.dash || ""});
+  label(svg, x + w / 2, y + (sub ? h / 2 - 4 : h / 2 + 6), title, {size: o.size || 19, bold: true, color: o.tc || INK});
+  (Array.isArray(sub) ? sub : sub ? [sub] : []).forEach((s, i) => label(svg, x + w / 2, y + h / 2 + 18 + i * 19, s, {size: 14.5, color: o.sc || MUTED}));
+}
+label(ar, 750, 34, "Architecture: three ways in, one engine, one database", {size: 22, bold: true, color: INK});
+node(ar, 80, 70, 330, 84, "Web browser", "search, read, compare, graph...");
+node(ar, 450, 70, 330, 84, "Other programs", "scripts, notebooks, apps");
+node(ar, 900, 70, 520, 84, "Terminal", "python docretrieval.py <command>");
+node(ar, 80, 215, 700, 92, "Flask website: webapp.py", ["pages, JSON API (/api), CSV/JSON export, read-only mode", "app.py is the entry point used on Vercel"], {fill: "#e8f4f3", stroke: TEAL});
+node(ar, 900, 215, 520, 92, "Command-line interface", ["argparse: add, list, search, read, compare, related,", "graph, cooccur, download, delete, stats, demo + more"], {fill: "#e8f4f3", stroke: TEAL});
+line(ar, 245, 154, 245, 215, {arrow: true}); line(ar, 615, 154, 615, 215, {arrow: true}); line(ar, 1160, 154, 1160, 215, {arrow: true});
+// engine
+el(ar, "rect", {x: 80, y: 370, width: 1340, height: 150, rx: 14, fill: "#fff7e8", stroke: AMBER, "stroke-width": 2.8});
+label(ar, 110, 402, "DocumentStore: the engine (docretrieval.py)", {anchor: "start", size: 20, bold: true, color: "#8a5200"});
+const chips = ["Storage", "Search (BM25)", "Reading", "Comparison", "Association", "Download", "Delete + stats"];
+chips.forEach((c, i) => {
+  const cx = 104 + i * 189;
+  el(ar, "rect", {x: cx, y: 425, width: 172, height: 70, rx: 10, fill: "#fff", stroke: AMBER, "stroke-width": 1.8});
+  label(ar, cx + 86, 466, c, {size: 16.5, bold: true, color: INK});
+});
+line(ar, 430, 307, 430, 370, {arrow: true}); line(ar, 1160, 307, 1160, 370, {arrow: true});
+label(ar, 440, 342, "same engine, same data", {anchor: "start", size: 14, italic: true});
+line(ar, 750, 520, 750, 580, {arrow: true});
+label(ar, 762, 556, "pymongo driver (mongodb:// local, mongodb+srv:// Atlas)", {anchor: "start", size: 14.5, italic: true});
+// mongodb
+el(ar, "rect", {x: 80, y: 585, width: 1340, height: 130, rx: 14, fill: "#eaf1ec", stroke: "#2d7a4b", "stroke-width": 2.8});
+label(ar, 110, 614, "MongoDB (local mongod while developing, MongoDB Atlas when deployed)", {anchor: "start", size: 18, bold: true, color: "#1d5a37"});
+[["documents", "metadata + text", 104, 300], ["postings", "inverted index", 424, 300], ["meta", "corpus counters", 744, 260], ["GridFS", "fs.files + fs.chunks: original files", 1024, 380]].forEach(([t, s, x, w]) => {
+  el(ar, "rect", {x, y: 630, width: w, height: 70, rx: 10, fill: "#fff", stroke: "#2d7a4b", "stroke-width": 1.8});
+  label(ar, x + w / 2, 660, t, {size: 17.5, bold: true, color: INK, mono: true}); label(ar, x + w / 2, 683, s, {size: 14});
+});
+ar.setAttribute("height", 740);
+
+/* ------------------------------ flows ------------------------------ */
+function flow(svgId, title, steps) {
+  const svg = document.getElementById(svgId);
+  arrowDefs(svg);
+  label(svg, 780, 34, title, {size: 22, bold: true, color: INK});
+  const w = 224, gap = 32, x0 = 40;
+  steps.forEach((s, i) => {
+    const x = x0 + i * (w + gap), y = 70;
+    el(svg, "rect", {x, y, width: w, height: 200, rx: 12, fill: i === steps.length - 1 ? "#fff7e8" : "#fff", stroke: i === steps.length - 1 ? AMBER : TEAL, "stroke-width": 2.6});
+    el(svg, "circle", {cx: x + 30, cy: y + 34, r: 18, fill: i === steps.length - 1 ? AMBER : TEAL});
+    label(svg, x + 30, y + 40, String(i + 1), {size: 18, bold: true, color: "#fff"});
+    label(svg, x + 58, y + 40, s.t, {anchor: "start", size: 17.5, bold: true, color: INK});
+    s.l.forEach((ln, j) => label(svg, x + 16, y + 82 + j * 25, ln, {anchor: "start", size: 14.5, color: (s.mono || []).includes(j) ? INK : MUTED, mono: (s.mono || []).includes(j)}));
+    if (i < steps.length - 1) line(svg, x + w + 3, y + 100, x + w + gap - 4, y + 100, {arrow: true});
+  });
+  return svg;
+}
+flow("store", "Storing a document: what add_document does", [
+  {t: "Input", l: ["title, type, year,", "authors, keywords,", "text, original file", "(PDF, TXT, PNG, DXF...)"]},
+  {t: "Validate", l: ["title not empty", "type is paper, patent,", "report or drawing", "year is plausible", "id is not taken"]},
+  {t: "Get the text", l: ["use the text given,", "else read it from a", ".txt or .pdf file,", "else use the", "description (drawings)"]},
+  {t: "Analyse", l: ["lower-case, split", "drop stop words", "strip plural endings", "", "'Gearboxes' -> gearbox"], mono: [4]},
+  {t: "Weight", l: ["count each term:", "title word  x3", "keyword     x2", "abstract/text x1", "length = sum of counts"]},
+  {t: "Write", l: ["1 file to GridFS", "2 record to documents", "3 one posting per term", "4 update meta counters", "any error: undo all"]}]);
+flow("search", "Searching: what search_ex does", [
+  {t: "Query", l: ["'\"posting list\" -sensor", "type:patent year:>2019'", "", "typed in the box,", "CLI or API"], mono: [0, 1]},
+  {t: "Parse", l: ["terms: posting, list", "phrase: posting list", "exclude: sensor", "filters: patent,", "year from 2020"]},
+  {t: "Look up", l: ["one query on postings:", "term in [posting, list]", "uses the (term, doc_id)", "index; gives tf and", "df for each term"]},
+  {t: "Score (BM25)", l: ["per term: idf x tf part", "rare terms weigh more,", "repeats count less,", "long documents are", "slightly penalised"]},
+  {t: "Filter", l: ["type, year, author,", "keyword, title filters", "drop excluded words", "check the exact phrase", "in the stored text"]},
+  {t: "Present", l: ["rank by score", "snippet with matches", "facet counts", "10 per page", "'did you mean' if empty"]}]);
+</script>
+</body>
+</html>

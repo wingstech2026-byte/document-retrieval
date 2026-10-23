@@ -358,3 +358,17 @@ spelling, explain adding up to the real search score, insights, analytics agains
 `test_webapp_features.py` (21 web tests: facet links, suggestions, pagination, exports including CSV-formula safety, citation downloads,
 analytics and duplicate pages, the add-time warning, the JSON API and its errors, and that the read-only site keeps all of this).
 Breaking the phrase check, the exclusion or the spelling distance on purpose makes the matching test fail.
+
+## 9. Report and presentation material
+
+`docs/` has everything for handing in and presenting this experiment:
+
+* `Experiment5_Report.docx` and `Experiment5_Report.pdf`: the experiment report (33 pages): requirements, design with the ER diagram and data
+  dictionary, implementation of every function with code and screenshots, tests, and a scale benchmark with 2,000 to 10,000 documents.
+  Fill in your name and student ID on the cover.
+* `Experiment5_Presentation.pptx`: 24 slides with speaker notes on every slide.
+* `PRESENTATION_GUIDE.md`: how the system works, how documents are stored, the code to explain, a slide-by-slide script, a live-demo plan and
+  likely questions.
+* `diagrams/`, `screenshots/`, `code/`, `figures/`: the images used in the report and the slides.
+* `benchmark.py` (writes `benchmark_results_*.json`), `make_charts.py` (draws `figures/`) and `make_images.py` (code, data and terminal
+  images) regenerate the measurements and images from the real source and database.
