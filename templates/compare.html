@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Compare{% endblock %}
+{% block body %}
+<h1>Compare two documents</h1>
+<form class="card search" method="get" action="{{ url_for('compare') }}">
+  <div style="grid-column:span 2"><label for="a">Document A</label>
+    <select id="a" name="a">{% for o in all_docs %}<option value="{{ o._id }}" {{ 'selected' if o._id == a }}>{{ o.title }} ({{ o._id }})</option>{% endfor %}</select></div>
+  <div style="grid-column:span 2"><label for="b">Document B</label>
+    <select id="b" name="b">{% for o in all_docs %}<option value="{{ o._id }}" {{ 'selected' if o._id == b }}>{{ o.title }} ({{ o._id }})</option>{% endfor %}</select></div>
+  <div><button>Compare</button></div>
+</form>
+{% if c %}
+<div class="grid2">
+  {% for side in (c.a, c.b) %}<div class="card"><span class="tag t-{{ side.type }}">{{ side.type }}</span> {{ side.year or '' }}<br>
+    <a href="{{ url_for('doc', doc_id=side.doc_id) }}"><strong>{{ side.title }}</strong></a></div>{% endfor %}
+</div>
+<div class="card">
+  <div class="muted small">TF-IDF cosine similarity</div>
+  <div class="big">{{ '%.3f'|format(c.cosine) }}</div>
+  <div class="meter" role="img" aria-label="similarity {{ '%.0f'|format(c.cosine*100) }} percent"><i style="width:{{ (c.cosine*100)|round(1) }}%"></i></div>
+</div>
+<div class="grid2">
+  <div class="card"><h2 style="margin-top:0">Shared terms <span class="muted small">({{ c.shared_term_count }})</span></h2>
+    <div class="chips">{% for t, w in c.shared_terms %}<span class="chip">{{ t }}</span>{% else %}<span class="muted">none</span>{% endfor %}</div></div>
+  <div class="card"><h2 style="margin-top:0">Only in A</h2>
+    <div class="chips">{% for t, w in c.only_a %}<span class="chip">{{ t }}</span>{% else %}<span class="muted">none</span>{% endfor %}</div></div>
+  <div class="card"><h2 style="margin-top:0">Only in B</h2>
+    <div class="chips">{% for t, w in c.only_b %}<span class="chip">{{ t }}</span>{% else %}<span class="muted">none</span>{% endfor %}</div></div>
+</div>
+<div class="card"><h2 style="margin-top:0">Metadata overlap</h2>
+  <table>
+    <tr><th>Same type</th><td>{{ 'yes' if c.metadata.same_type else 'no' }}</td></tr>
+    <tr><th>Year gap</th><td>{{ c.metadata.year_gap if c.metadata.year_gap is not none else 'n/a' }}</td></tr>
+    <tr><th>Shared authors</th><td>{{ c.metadata.shared_authors|join(', ') or 'none' }} <span class="muted small">(Jaccard {{ '%.2f'|format(c.metadata.author_jaccard) }})</span></td></tr>
+    <tr><th>Shared keywords</th><td>{{ c.metadata.shared_keywords|join(', ') or 'none' }} <span class="muted small">(Jaccard {{ '%.2f'|format(c.metadata.keyword_jaccard) }})</span></td></tr>
+  </table></div>
+{% endif %}
+{% endblock %}

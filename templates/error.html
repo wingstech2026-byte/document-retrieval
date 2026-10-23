@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Error{% endblock %}
+{% block body %}
+<div class="card err"><h1>{{ "Not found" if code == 404 else "Something went wrong" }}</h1>
+<p>{{ message }}</p><p><a href="{{ url_for('home') }}">Back to search</a></p></div>
+{% endblock %}

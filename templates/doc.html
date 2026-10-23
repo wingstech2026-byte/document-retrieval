@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}{{ d.title }}{% endblock %}
+{% block body %}
+<p class="small"><a href="{{ url_for('home') }}">&larr; All documents</a></p>
+<h1><span class="tag t-{{ d.type }}">{{ d.type }}</span>{{ d.title }}</h1>
+<div class="cols">
+  <div>
+    <div class="card">
+      {% if d.content_type and d.content_type.startswith('image/') and d.content_type != 'image/svg+xml' %}
+        <img class="drawing" src="{{ url_for('file', doc_id=d._id, inline=1) }}" alt="Drawing: {{ d.title }}">
+        <h2>Description</h2>
+      {% endif %}
+      <div class="reading">{{ r.content.strip() }}</div>
+      {% if r.pages > 1 %}
+      <div class="pager">
+        {% if r.page > 1 %}<a class="btn ghost" href="{{ url_for('doc', doc_id=d._id, page=r.page-1) }}">&larr; Previous</a>{% else %}<span></span>{% endif %}
+        <span class="muted">Page {{ r.page }} of {{ r.pages }}</span>
+        {% if r.page < r.pages %}<a class="btn ghost" href="{{ url_for('doc', doc_id=d._id, page=r.page+1) }}">Next &rarr;</a>{% else %}<span></span>{% endif %}
+      </div>{% endif %}
+    </div>
+  </div>
+  <aside>
+    <div class="card">
+      <table>
+        <tr><th>ID</th><td>{{ d._id }}</td></tr>
+        <tr><th>Year</th><td>{{ d.year or 'n/a' }}</td></tr>
+        <tr><th>Authors</th><td>{{ d.authors|join(', ') or '-' }}</td></tr>
+        <tr><th>Keywords</th><td><div class="chips">{% for k in d.keywords %}<a class="chip" href="{{ url_for('keywords', keyword=k) }}">{{ k }}</a>{% else %}-{% endfor %}</div></td></tr>
+        <tr><th>File</th><td>{% if d.file_id %}{{ d.filename }}<br><span class="muted small">{{ d.content_type }}, {{ d.size|size }}</span>{% else %}none{% endif %}</td></tr>
+      </table>
+      {% if d.abstract %}<p class="small muted">{{ d.abstract }}</p>{% endif %}
+      <div class="actions">
+        {% if d.file_id %}<a class="btn" href="{{ url_for('file', doc_id=d._id) }}">Download original</a>{% endif %}
+        <form method="post" action="{{ url_for('delete', doc_id=d._id) }}" onsubmit="return confirm('Delete this document, its index entries and its stored file?')">
+          <button class="danger">Delete</button></form>
+      </div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">Compare with</h2>
+      <form method="get" action="{{ url_for('compare') }}">
+        <input type="hidden" name="a" value="{{ d._id }}">
+        <select name="b" aria-label="Document to compare with">{% for o in others %}<option value="{{ o._id }}">{{ o.title }}</option>{% endfor %}</select>
+        <p><button {{ 'disabled' if not others }}>Compare</button></p>
+      </form>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">Related documents</h2>
+      {% for x in related %}
+        <p style="margin:.5em 0"><a href="{{ url_for('doc', doc_id=x.doc_id) }}">{{ x.title }}</a><br>
+        <span class="muted small"><span class="tag t-{{ x.type }}">{{ x.type }}</span>similarity {{ '%.3f'|format(x.similarity) }} ·
+        <a href="{{ url_for('compare', a=d._id, b=x.doc_id) }}">compare</a><br>shares: {{ x.shared_terms|join(', ') }}</span></p>
+      {% else %}<p class="muted small">Nothing similar yet.</p>{% endfor %}
+    </div>
+  </aside>
+</div>
+{% endblock %}

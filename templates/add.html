@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Add a document{% endblock %}
+{% block body %}
+<h1>Add a document</h1>
+{% if error %}<div class="msg err" role="alert">{{ error }}</div>{% endif %}
+<form class="card" method="post" action="{{ url_for('add') }}" enctype="multipart/form-data">
+  <div class="grid2">
+    <div><label for="title">Title *</label><input id="title" type="text" name="title" value="{{ form.get('title', '') }}" required></div>
+    <div><label for="type">Type *</label><select id="type" name="type" required>
+      {% for t in doc_types %}<option value="{{ t }}" {{ 'selected' if form.get('type') == t }}>{{ t }}</option>{% endfor %}</select></div>
+    <div><label for="year">Year</label><input id="year" type="number" name="year" value="{{ form.get('year', '') }}" min="1000" max="2200"></div>
+    <div><label for="authors">Authors (separate with ;)</label><input id="authors" type="text" name="authors" value="{{ form.get('authors', '') }}"></div>
+  </div>
+  <p><label for="keywords">Keywords (separate with commas)</label><input id="keywords" type="text" name="keywords" value="{{ form.get('keywords', '') }}"></p>
+  <p><label for="abstract">Abstract / description</label><textarea id="abstract" name="abstract" style="min-height:80px">{{ form.get('abstract', '') }}</textarea></p>
+  <p><label for="text">Full text <span class="muted">(optional: taken from a .txt or .pdf file if left empty)</span></label><textarea id="text" name="text">{{ form.get('text', '') }}</textarea></p>
+  <p><label for="file">Original file (PDF, TXT, PNG, DXF, any binary; up to 64 MB)</label><input id="file" type="file" name="file"></p>
+  <button>Store document</button>
+</form>
+{% endblock %}

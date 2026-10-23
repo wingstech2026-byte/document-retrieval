@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Search{% endblock %}
+{% block body %}
+<form class="card search" method="get" action="{{ url_for('home') }}" role="search">
+  <div class="wide"><input type="search" name="q" value="{{ form.q }}" placeholder="Search papers, patents, reports and drawings" aria-label="Search query" autofocus><button>Search</button></div>
+  <div><label for="type">Type</label>
+    <select id="type" name="type"><option value="">All types</option>
+      {% for t in doc_types %}<option value="{{ t }}" {{ 'selected' if form.type == t }}>{{ t }}</option>{% endfor %}</select></div>
+  <div><label for="yf">Year from</label><input id="yf" type="number" name="year_from" value="{{ form.year_from }}" min="1000" max="2200"></div>
+  <div><label for="yt">Year to</label><input id="yt" type="number" name="year_to" value="{{ form.year_to }}" min="1000" max="2200"></div>
+  <div><label for="au">Author</label><input id="au" type="text" name="author" value="{{ form.author }}" placeholder="e.g. berg"></div>
+  <label class="chk"><input type="checkbox" name="all" value="1" {{ 'checked' if form.all }}> all terms</label>
+</form>
+
+{% if results is not none %}
+  <p class="muted">{{ results|length }} result{{ '' if results|length == 1 else 's' }}, ranked by BM25</p>
+  <div class="card">
+  {% for r in results %}
+    <div class="result">
+      <h3><span class="tag t-{{ r.type }}">{{ r.type }}</span><a href="{{ url_for('doc', doc_id=r.doc_id) }}">{{ r.title }}</a><span class="score">score {{ '%.3f'|format(r.score) }}</span></h3>
+      <div class="muted small">{{ r.doc_id }} · {{ r.year or 'n/a' }} · {{ r.authors|join(', ') or 'no authors' }}</div>
+      {% if r.snippet %}<p class="snip">{{ r.snippet|hl }}</p>{% endif %}
+    </div>
+  {% else %}<div class="empty">No documents match. Try fewer terms or loosen the filters.</div>{% endfor %}
+  </div>
+{% else %}
+  {% if docs %}
+  <div class="card"><table>
+    <thead><tr><th>Title</th><th>Type</th><th>Year</th><th>Authors</th><th>File</th></tr></thead>
+    <tbody>{% for d in docs %}<tr>
+      <td><a href="{{ url_for('doc', doc_id=d._id) }}">{{ d.title }}</a><div class="muted small">{{ d._id }}</div></td>
+      <td><span class="tag t-{{ d.type }}">{{ d.type }}</span></td><td>{{ d.year or '' }}</td>
+      <td>{{ d.authors|join(', ') }}</td><td class="small">{{ d.size|size if d.size else '-' }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% else %}
+  <div class="card empty"><p><strong>No documents yet.</strong></p>
+    <form method="post" action="{{ url_for('load_samples') }}" style="display:inline"><button>Load the 10 sample documents</button></form>
+    <a class="btn ghost" href="{{ url_for('add') }}">Add your own</a></div>
+  {% endif %}
+{% endif %}
+{% endblock %}

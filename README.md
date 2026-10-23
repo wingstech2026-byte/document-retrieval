@@ -1,0 +1,280 @@
+# Experiment 5: Large-scale document retrieval system (MongoDB + GridFS)
+
+A document store and search engine for four kinds of documents: **papers, patents, technical reports and engineering drawings**.
+Metadata and text live in MongoDB collections, the original files (including binary drawings) live in GridFS, and search runs on an
+inverted index that is itself stored in MongoDB.
+
+| Required function | Where |
+|---|---|
+| document storage | `add` / `DocumentStore.add_document` |
+| document retrieval | `search` (BM25, filters, snippets), `list` |
+| document reading | `read` (paginated) |
+| document comparison | `compare` (TF-IDF cosine, shared/distinctive terms, metadata overlap) |
+| document association analysis | `related`, `graph`, `cooccur` |
+| document download | `download` (GridFS to a folder) |
+| extras | `delete` (cleans index and GridFS), `stats`, `demo` |
+
+Files: `docretrieval.py` (engine and CLI), `sample_data.py` (10 original sample documents), `test_docretrieval.py` (54 tests),
+`webapp.py` + `templates/` + `static/` (web site, section 6), `test_webapp.py` (19 tests), `requirements.txt`.
+
+## 1. Design
+
+### Collections
+
+```
+documents   one record per document
+postings    inverted index: one record per (term, doc_id)
+meta        one record {_id: "corpus", n, total_len}: document count and total length, used by BM25
+fs.files, fs.chunks   GridFS: the original files
+```
+
+`documents` record:
+
+```json
+{
+  "_id": "pat-001",                 // generated as <pap|pat|rep|drw>-<8 hex> unless --doc-id is given
+  "title": "Method for Compressing Posting Lists ...",
+  "type": "patent",                 // paper | patent | report | drawing
+  "authors": ["Sofia Alvarez"],
+  "keywords": ["inverted index", "compression", "posting list"],   // lower-cased, de-duplicated
+  "year": 2020,
+  "abstract": "...",
+  "text": "...",                    // full text (given, or extracted from a .txt/.pdf file); drawings use their description
+  "length": 192,                    // weighted token count, used by BM25 length normalisation
+  "file_id": ObjectId("..."),       // -> fs.files._id (null if no file)
+  "filename": "pat-001.txt", "content_type": "text/plain", "size": 1457, "sha256": "...",
+  "added_at": ISODate("...")
+}
+```
+
+`postings` record: `{ "term": "index", "doc_id": "pat-001", "tf": 6 }`.
+`tf` is weighted: a term occurrence counts 3 in the title, 2 in a keyword, 1 in the abstract or body.
+
+GridFS file metadata: `{ "doc_id": "pat-001", "content_type": "...", "doc_type": "patent" }`. Drawings are real binary files
+(the samples are generated PNGs); the engine never tries to decode them.
+
+### Indexes
+
+| Collection | Index | Purpose |
+|---|---|---|
+| postings | `(term, doc_id)` **unique** | one record per pair; find all postings of a term; ordered scan for the graph |
+| postings | `doc_id` | rebuild a document's vector (compare/related) and delete its entries |
+| documents | `(type, year)`, `year`, `authors`, `keywords` | metadata filters, listing, co-occurrence |
+
+### Algorithms
+
+* **Tokenising**: lower-case, split on non-alphanumerics, drop stop words and 1-letter tokens, strip plural endings (`networks` ->
+  `network`, `gearboxes` -> `gearbox`). There is no further stemming, so `optimize` and `optimization` are different terms.
+* **Search (BM25)**: for each query term the postings are fetched with one `$in` query, and a document scores
+  `sum idf(t) * tf * (k1+1) / (tf + k1 * (1 - b + b * dl/avgdl))` with `idf = ln(1 + (N - df + 0.5)/(df + 0.5))`, `k1 = 1.5`, `b = 0.75`.
+  Any query term may match (`--all` requires every term). Filters on type, year range and author (case-insensitive substring)
+  are applied to the candidate documents. The snippet is the 28-word window with the most query-term hits, with hits marked `**like this**`.
+* **Reading**: the text is cut into pages of a chosen number of characters, preferring a paragraph break, then a word break.
+  The pages concatenate back to the exact original text.
+* **Comparison**: TF-IDF vectors from the two documents' postings, weight `(1 + ln tf) * (ln((N+1)/(df+1)) + 1)`, then cosine
+  similarity. Shared terms are ranked by their joint weight (their contribution to the dot product), distinctive terms by their weight
+  in their own document. Metadata overlap: shared authors, shared keywords, Jaccard of each, same type, year gap.
+* **Related documents**: take the 25 heaviest terms of the document, collect candidate documents from those postings,
+  and score up to 200 candidates exactly by cosine.
+* **Similarity graph**: all-pairs cosine, computed term by term from the postings in index order. Edges are pairs at or above the
+  threshold; connected components give topic groups. Output can be saved as Graphviz (`--dot`) or JSON (`--json`).
+* **Keyword co-occurrence**: one MongoDB aggregation (`$unwind` twice, keep `a < b`, `$group` by pair), so counting happens in the database.
+* **Delete**: remove the document's postings, then its GridFS file, then the document record and the corpus counters, in that order.
+  A half-finished delete never leaves a searchable ghost and can simply be run again.
+* **Add** writes the GridFS file, the document and the postings. If a step fails, everything written so far is undone.
+* **Download** streams the file out of GridFS into a folder, never overwrites (a numeric suffix is added: `name (1).ext`),
+  keeps only the base name of the stored file name, and verifies the SHA-256 recorded at storage time.
+
+### Limits worth knowing
+
+* A standalone `mongod` has no multi-document transactions, so add/delete use ordered writes and manual rollback as described above
+  rather than a transaction (use a replica set and `with_transaction` if you need that).
+* `similarity_graph` costs about the sum of `df^2` over all terms, so it suits thousands of documents. For a much larger corpus use
+  `related`, or restrict the graph with `--type`. Search fetches all postings of the query terms; very common terms are the expensive ones.
+* Text is extracted only for plain-text files and PDFs (`pypdf`, optional). Scanned PDFs and drawings are indexed through their
+  title, keywords and abstract/description.
+
+## 2. MongoDB setup
+
+Any MongoDB 5.0+ works. The code was tested against MongoDB **8.0.34** (Community) on Windows.
+
+**Docker** (the quickest):
+
+```bash
+docker run -d --name mongo-docs -p 27017:27017 -v mongo-docs-data:/data/db mongo
+```
+
+**Windows without Docker** (what was used for the test run): download the Community `.zip` from
+<https://www.mongodb.com/try/download/community> (or install the MSI), unzip it, then
+
+```powershell
+mkdir C:\mongo-data
+.\mongodb-win32-x86_64-windows-8.0.34\bin\mongod.exe --dbpath C:\mongo-data --bind_ip 127.0.0.1 --port 27017
+```
+
+**macOS**: `brew tap mongodb/brew && brew install mongodb-community && brew services start mongodb-community`.
+**Linux**: install `mongodb-org` from the MongoDB repository and `sudo systemctl start mongod`.
+
+Then install the Python packages:
+
+```bash
+pip install -r requirements.txt
+```
+
+The default connection is `mongodb://localhost:27017`. Override it with `--uri ...` or `$MONGO_URI`; choose the database with
+`--db NAME` or `$DOCRETRIEVAL_DB` (default `docretrieval`; the demo uses `docretrieval_demo`). Indexes are created automatically on first connect.
+If the server cannot be reached the CLI says so and exits with status 2.
+
+## 3. Running it
+
+```bash
+python docretrieval.py demo                    # load the samples and tour every feature
+python docretrieval.py -h                      # all subcommands
+
+python docretrieval.py add --title "Notes on shear stress" --type report \
+       --author "A. Rivera; B. Chen" --keyword "shear, torsion" --year 2024 --file notes.pdf
+python docretrieval.py list --type patent
+python docretrieval.py search inverted index compression --limit 5
+python docretrieval.py search vibration --type report --year-from 2023 --author berg
+python docretrieval.py search bearing vibration --all
+python docretrieval.py read pap-003 --page 2 --page-size 450
+python docretrieval.py compare pap-003 rep-002
+python docretrieval.py related pat-002 --limit 4
+python docretrieval.py graph --threshold 0.10 --dot graph.dot --json graph.json
+python docretrieval.py cooccur --min-count 2          # or --keyword "wind turbine"
+python docretrieval.py download drw-001 --dest downloads
+python docretrieval.py delete pap-001 pap-002
+python docretrieval.py stats
+```
+
+`add` takes `--type paper|patent|report|drawing` (`technical report` is accepted for `report`), `--text` or `--text-file` for the body,
+and `--file` for the original (PDF, TXT, PNG, DXF, any binary). If no text is given and the file is a `.txt` or `.pdf`, the text is extracted from it.
+The `demo` command only touches the ten sample ids in its own database: it deletes and re-adds those, so it can be run repeatedly.
+
+From Python:
+
+```python
+from docretrieval import DocumentStore
+st = DocumentStore("mongodb://localhost:27017", "docretrieval")
+st.add_document("My report", "report", authors=["Me"], keywords=["x"], year=2024, file_path="report.pdf")
+st.search("vibration", doc_type="paper", year_from=2022, author="berg")
+```
+
+## 4. Tests
+
+```bash
+python -m pytest -q          # needs MongoDB; each run uses a throw-away database that is dropped afterwards
+```
+
+54 tests (about 10 s), grouped as: storage and index structure (unique `(term, doc_id)`, rollback on bad input), ranking (a hand-computed
+BM25 check, rare-term weighting, title/keyword matching, `--all`, snippets), filters (type, year range, author, combined), reading
+(lossless pagination, out-of-range pages), comparison (identity = 1, symmetry, shared/distinctive terms, metadata overlap),
+association analysis (related, graph vs. `compare`, threshold monotonicity, component grouping, co-occurrence vs. a manual count),
+download round trip (byte-identical, binary PNG, no overwrite, path traversal, corruption detected) and delete cleanup (no residue
+in `documents`, `postings`, `fs.files`, `fs.chunks`; counters; search/analysis no longer see it; resumable after a partial failure).
+If MongoDB is not reachable the tests are skipped, not passed.
+
+Result of the last run against a local `mongod` 8.0.34: `54 passed in 10.13s`. The tests were also checked by breaking the code on
+purpose (skipping posting deletion, and removing BM25 length normalisation); the relevant tests failed each time.
+
+## 5. Example output (from `python docretrieval.py demo`)
+
+Abridged; the full run also shows a listing, a second comparison, per-step statistics and the delete cleanup.
+
+```
+=== 1. Storage: loading 10 sample documents into database 'docretrieval_demo' ===
+  stored pap-001  paper    Adaptive Learned Indexes for Skewed Key Distributions      file  1,282 B
+  ...
+  stored drw-001  drawing  Gearbox Housing Assembly Drawing, Sheet 3                  file  1,016 B
+database: docretrieval_demo
+documents: 10  by type: drawing=2, paper=4, patent=2, report=2
+GridFS files: 10 (11,733 bytes)
+index: 945 postings, 701 distinct terms, avg doc length 161.7
+
+=== 3. Ranked search (BM25): 'inverted index compression' ===
+ 1. [7.436] pat-001  patent, 2020  Method for Compressing Posting Lists Using Block-wise Delta Coding
+     authors: Sofia Alvarez
+     ...storing a posting list of an **inverted** **index**, the posting list comprising document identifiers in ascending order...
+ 2. [4.732] pap-004  paper, 2021  Ranking Short Technical Documents with Sparse and Dense Signals
+     ...words are strong evidence, and the **inverted** **index** that supports it is cheap to build and update. ...
+ 3. [2.420] pap-001  paper, 2022  Adaptive Learned Indexes for Skewed Key Distributions
+     Classic B-tree **indexes** spend most of their lookup time walking from the root to a leaf. A learned **index** shortcuts ...
+
+=== 3c. Filtered search: 'nosql cluster', years 2021-2023, author 'haddad' ===
+ 1. [3.006] rep-001  report, 2023  Load Test Report: Replica Set Failover in a Three-Node Document Cluster
+ 2. [2.429] pap-002  paper, 2023  Sharding Strategies for Document Stores under Hotspot Workloads
+ 3. [0.844] pap-001  paper, 2022  Adaptive Learned Indexes for Skewed Key Distributions
+
+=== 4. Reading (paginated, 450 characters per page): pap-003, page 2 ===
+Federated Training of Fault Detectors on Wind Turbine Gearboxes  [pap-003, paper, 2024]
+original file: pap-003.txt (use 'download pap-003' to fetch it)
+--- page 2 of 3 ---
+We therefore train a fault detector in a federated way. Each farm fits a compact neural network ...
+
+=== 5. Comparison ===
+A: pap-003  Federated Training of Fault Detectors on Wind Turbine Gearboxes (paper, 2024)
+B: rep-002  Condition Monitoring Field Report: Gearbox Bearings at Site K (report, 2024)
+TF-IDF cosine similarity: 0.2262
+Shared terms (25 total, top by joint weight): gearbox, turbine, fault, vibration, detector, wind, detection, site, bearing, gear
+Only in A: farm, federated, train, training, data, model, raw, learning, yet, window
+Only in B: monitoring, condition, baseline, trend, race, finding, eight, spectra, day, outer
+Metadata: same type=False, year gap=0
+  shared authors (0.33 Jaccard): Tomas Berg
+  shared keywords (0.43 Jaccard): fault detection, wind turbine, vibration
+(pap-003 vs pat-001, an unrelated pair, scores 0.0305)
+
+=== 6b. Similarity graph (cosine >= 0.10) ===
+threshold 0.1: 10 nodes, 11 edges
+  pap-003 -- rep-002  0.2262
+  pat-002 -- rep-002  0.2050
+  ...
+connected groups with 2+ documents: 3
+  group 1: drw-001, pap-003, pat-002, rep-002       <- wind-turbine condition monitoring
+  group 2: drw-002, pap-001, pap-002, rep-001       <- document databases
+  group 3: pap-004, pat-001                         <- inverted-index retrieval
+
+=== 6c. Keyword co-occurrence (pairs seen in 2+ documents) ===
+  3  gearbox + wind turbine   (drw-001, pap-003, pat-002)
+  3  vibration + wind turbine   (pap-003, pat-002, rep-002)
+  2  information retrieval + inverted index   (pap-004, pat-001)
+  2  mongodb + nosql   (pap-002, rep-001)
+
+=== 7. Download an engineering drawing from GridFS ===
+wrote ...\downloads\gearbox_housing_sheet3.png (1,016 bytes, sha256 e9a72661ab92c234..., checksum verified)
+
+=== 8. Delete cleanup: add a throwaway document with a file, then delete it ===
+after adding tmp-demo: 11 docs, 951 postings, 11 GridFS files
+deleted tmp-demo: 6 postings removed, GridFS file removed
+after deleting it : 10 docs, 945 postings, 10 GridFS files
+postings still pointing at tmp-demo: 0
+```
+
+## 6. Web site
+
+A Flask app on top of the same engine; every function above is available in the browser.
+
+```bash
+pip install -r requirements.txt            # includes flask
+python webapp.py --db docretrieval_demo    # then open http://127.0.0.1:5000
+```
+
+On an empty database the home page offers a "Load the 10 sample documents" button. Options: `--uri`, `--db`, `--host`, `--port`, `--debug`
+(`$MONGO_URI` and `$DOCRETRIEVAL_DB` work too).
+
+| Page | What it does |
+|---|---|
+| `/` Search | BM25 search box with type, year-range and author filters, an "all terms" switch, and highlighted snippets; with no query it lists every document |
+| `/doc/<id>` | metadata, paginated reading (1,000 characters per page), image preview for drawings, **Download original**, **Delete**, "Compare with", related documents |
+| `/compare` | pick two documents: cosine bar, shared and distinctive terms, author/keyword overlap |
+| `/graph` | similarity graph (SVG, nodes coloured by type) with a threshold control, topic groups and a link table |
+| `/keywords` | keyword co-occurrence, optionally for one keyword or one type |
+| `/add` | upload form: metadata, text and any original file (up to 64 MB) |
+| `/stats` | counts by type, index size, GridFS usage, top keywords and terms |
+
+Notes: downloads stream from GridFS to the browser; only images, PDF and plain text are ever displayed inline, anything else (for example an
+uploaded `.html`) is forced to download. All stored text is HTML-escaped. Delete is a POST with a confirmation dialog and removes the document,
+its index entries and its GridFS file. **There is no login**: the server listens on 127.0.0.1 by default, so do not expose it to an untrusted
+network as is. It uses Flask's development server, which is fine for a lab or demo.
+
+`python -m pytest -q` now runs 73 tests (54 engine + 19 web: every page renders, filters and highlighting, paging, byte-identical file download,
+no inline active content, HTML escaping, upload then search then download then delete, validation errors, repeatable sample loading, empty database).

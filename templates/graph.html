@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Similarity graph{% endblock %}
+{% block body %}
+<h1>Similarity graph</h1>
+<form class="card search" method="get" action="{{ url_for('graph') }}">
+  <div><label for="th">Minimum cosine similarity</label><input id="th" type="number" name="threshold" value="{{ threshold }}" min="0" max="1" step="0.01"></div>
+  <div><label for="ty">Type</label><select id="ty" name="type"><option value="">All types</option>
+    {% for t in doc_types %}<option value="{{ t }}" {{ 'selected' if sel_type == t }}>{{ t }}</option>{% endfor %}</select></div>
+  <div><button>Update</button></div>
+</form>
+{% if not g.nodes %}<div class="card empty">No documents to graph.</div>{% else %}
+<p class="muted">{{ g.nodes|length }} documents, {{ g.edges|length }} links at or above {{ threshold }}.
+  {% if truncated %}Showing the first {{ pos|length }} documents only.{% endif %}</p>
+<div class="legend">{% for t in doc_types %}<span><i style="background:var(--{{ t }})"></i>{{ t }}</span>{% endfor %}</div>
+<svg class="graph" viewBox="0 0 720 660" role="img" aria-label="Document similarity graph with {{ g.edges|length }} links">
+  {% for e in edges %}<line x1="{{ pos[e.source].x|round(1) }}" y1="{{ pos[e.source].y|round(1) }}" x2="{{ pos[e.target].x|round(1) }}" y2="{{ pos[e.target].y|round(1) }}"
+     stroke-width="{{ (1 + e.weight * 8)|round(1) }}" stroke-opacity="0.55"><title>{{ e.source }} – {{ e.target }}: {{ '%.3f'|format(e.weight) }}</title></line>{% endfor %}
+  {% for id, p in pos.items() %}<a href="{{ url_for('doc', doc_id=id) }}">
+    <circle class="n-{{ p.type }}" cx="{{ p.x|round(1) }}" cy="{{ p.y|round(1) }}" r="9"><title>{{ p.title }}</title></circle>
+    <text x="{{ p.lx|round(1) }}" y="{{ p.ly|round(1) }}" text-anchor="{{ p.anchor }}">{{ id }}</text></a>{% endfor %}
+</svg>
+<h2>Topic groups</h2>
+<div class="grid2">{% for comp in g.components if comp|length > 1 %}
+  <div class="card"><strong>Group {{ loop.index }}</strong> <span class="muted small">({{ comp|length }} documents)</span>
+    {% for id in comp %}<div><a href="{{ url_for('doc', doc_id=id) }}">{{ info[id].title }}</a> <span class="muted small">{{ id }}</span></div>{% endfor %}</div>
+{% else %}<p class="muted">No groups at this threshold; lower it to connect more documents.</p>{% endfor %}</div>
+<h2>Links</h2>
+<div class="card"><table><thead><tr><th>Document</th><th>Document</th><th class="num">Cosine</th></tr></thead><tbody>
+  {% for e in g.edges %}<tr><td><a href="{{ url_for('doc', doc_id=e.source) }}">{{ info[e.source].title }}</a></td>
+  <td><a href="{{ url_for('doc', doc_id=e.target) }}">{{ info[e.target].title }}</a></td>
+  <td class="num"><a href="{{ url_for('compare', a=e.source, b=e.target) }}">{{ '%.3f'|format(e.weight) }}</a></td></tr>
+  {% else %}<tr><td colspan="3" class="muted">No pairs reach this similarity.</td></tr>{% endfor %}</tbody></table></div>
+{% endif %}
+{% endblock %}

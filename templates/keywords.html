@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Keyword co-occurrence{% endblock %}
+{% block body %}
+<h1>Keyword co-occurrence</h1>
+<form class="card search" method="get" action="{{ url_for('keywords') }}">
+  <div><label for="k">Keyword (optional)</label><input id="k" type="text" name="keyword" value="{{ keyword }}" placeholder="e.g. wind turbine"></div>
+  <div><label for="m">Minimum documents</label><input id="m" type="number" name="min" value="{{ min_count }}" min="1"></div>
+  <div><label for="ty">Type</label><select id="ty" name="type"><option value="">All types</option>
+    {% for t in doc_types %}<option value="{{ t }}" {{ 'selected' if sel_type == t }}>{{ t }}</option>{% endfor %}</select></div>
+  <div><button>Update</button></div>
+</form>
+<div class="card"><table><thead><tr><th>Keyword pair</th><th class="num">Documents</th><th>Seen in</th></tr></thead><tbody>
+{% for r in rows %}<tr><td><a class="chip" href="{{ url_for('keywords', keyword=r.a) }}">{{ r.a }}</a> + <a class="chip" href="{{ url_for('keywords', keyword=r.b) }}">{{ r.b }}</a></td>
+  <td class="num">{{ r.count }}</td><td class="small">{% for id in r.docs %}<a href="{{ url_for('doc', doc_id=id) }}">{{ id }}</a>{{ ', ' if not loop.last }}{% endfor %}</td></tr>
+{% else %}<tr><td colspan="3" class="muted">No keyword pairs match.</td></tr>{% endfor %}</tbody></table></div>
+{% endblock %}

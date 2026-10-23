@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Stats{% endblock %}
+{% block body %}
+<h1>Collection statistics</h1>
+<div class="grid2">
+  <div class="card"><div class="muted small">Documents</div><div class="big">{{ s.documents }}</div></div>
+  <div class="card"><div class="muted small">Index entries (postings)</div><div class="big">{{ '{:,}'.format(s.postings) }}</div><span class="muted small">{{ '{:,}'.format(s.distinct_terms) }} distinct terms</span></div>
+  <div class="card"><div class="muted small">Stored files (GridFS)</div><div class="big">{{ s.gridfs_files }}</div><span class="muted small">{{ s.gridfs_bytes|size }}</span></div>
+  <div class="card"><div class="muted small">Distinct authors</div><div class="big">{{ s.distinct_authors }}</div><span class="muted small">{{ s.year_range|join('–') if s.year_range else 'no years' }}</span></div>
+</div>
+<div class="card"><h2 style="margin-top:0">By type</h2>
+  {% for t in doc_types %}{% set n = s.by_type.get(t, 0) %}
+  <div style="display:grid;grid-template-columns:90px 1fr 40px;gap:10px;align-items:center;margin:6px 0">
+    <span class="tag t-{{ t }}" style="justify-self:start">{{ t }}</span>
+    <div class="meter"><i style="width:{{ (n / s.documents * 100) if s.documents else 0 }}%;background:var(--{{ t }})"></i></div><span class="num">{{ n }}</span></div>{% endfor %}
+</div>
+<div class="grid2">
+  <div class="card"><h2 style="margin-top:0">Most common keywords</h2><div class="chips">{% for k, n in s.top_keywords %}<a class="chip" href="{{ url_for('keywords', keyword=k) }}">{{ k }} · {{ n }}</a>{% else %}<span class="muted">none</span>{% endfor %}</div></div>
+  <div class="card"><h2 style="margin-top:0">Most widespread terms</h2><div class="chips">{% for t, n in s.top_terms_by_df %}<span class="chip">{{ t }} · {{ n }}</span>{% else %}<span class="muted">none</span>{% endfor %}</div></div>
+</div>
+{% endblock %}

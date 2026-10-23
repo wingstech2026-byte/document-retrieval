@@ -1,0 +1,7 @@
+__pycache__/
+.pytest_cache/
+.playwright-mcp/
+downloads/
+*.pyc
+.env
+.venv/
