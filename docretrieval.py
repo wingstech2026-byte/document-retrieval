@@ -964,8 +964,12 @@ def main(argv=None) -> int:
     try:
         store = DocumentStore(args.uri, db_name)
     except ServerSelectionTimeoutError:
-        print(f"error: cannot reach MongoDB at {args.uri}. Start one, e.g. "
-              "'docker run -d -p 27017:27017 mongo' (see README).", file=sys.stderr)
+        print("error: cannot reach MongoDB. Start one, e.g. 'docker run -d -p 27017:27017 mongo' "
+              "(see README), or check the connection string, Atlas network access and any VPN/proxy.", file=sys.stderr)
+        return 2
+    except PyMongoError as e:  # e.g. DNS (SRV) lookup failure for a mongodb+srv:// address
+        print(f"error: could not connect to MongoDB ({type(e).__name__}: {str(e)[:160]}). If this mentions DNS, "
+              "a VPN/proxy or the network may be blocking the lookup; try another network.", file=sys.stderr)
         return 2
     try:
         args.fn(store, args)
