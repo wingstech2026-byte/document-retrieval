@@ -367,8 +367,94 @@ Breaking the phrase check, the exclusion or the spelling distance on purpose mak
   dictionary, implementation of every function with code and screenshots, tests, and a scale benchmark with 2,000 to 10,000 documents.
   Fill in your name and student ID on the cover.
 * `Experiment5_Presentation.pptx`: 24 slides with speaker notes on every slide.
+* `Experiment5_Study_Guide.docx` and `.pdf`: a plain-language explanation of the slides, one by one, with the big ideas, a one-line cheat sheet,
+  a glossary and practice questions (for learning the topic before presenting).
 * `PRESENTATION_GUIDE.md`: how the system works, how documents are stored, the code to explain, a slide-by-slide script, a live-demo plan and
   likely questions.
 * `diagrams/`, `screenshots/`, `code/`, `figures/`: the images used in the report and the slides.
 * `benchmark.py` (writes `benchmark_results_*.json`), `make_charts.py` (draws `figures/`) and `make_images.py` (code, data and terminal
   images) regenerate the measurements and images from the real source and database.
+
+## 10. Question answering with citations (`passages.py`)
+
+The first nine sections index whole documents. This part answers questions from them and shows the evidence.
+
+**Audit of the starting point** (what was there before this change): Flask + pymongo + GridFS on Vercel and MongoDB Atlas; BM25 search over
+whole documents; PDF text joined into one string (page numbers lost); no Word support; no passages, no question answering, no accounts
+(the public site is read-only, writes are switched off by `READ_ONLY=1`).
+
+**What was added**
+
+| Part | How it works |
+|---|---|
+| Upload (`/add`, `POST /ingest`) | Up to 20 files at once: PDF, DOCX, TXT, Markdown, CSV. Checks name, size, type and file signature (a `.pdf` must contain `%PDF-`, a `.docx` must be a Word zip without unsafe paths or zip-bomb size). Duplicates are found by SHA-256 and skipped. Each file has a job record: `uploaded → extracting → indexing → ready`, or `failed` with the reason. A failure leaves nothing behind. |
+| Extraction | PDF: text per page, so citations carry the real page number; pages with no text layer are listed as unreadable (no OCR is available, nothing is guessed). DOCX: headings and tables (rows kept as `a \| b`); Word has no fixed pages, so citations name the heading. Markdown: headings. CSV: `column: value` text. |
+| Passages | `chunks` holds passages of about 100 words made from whole sentences, never crossing a page, with 20 words of overlap; each remembers document, page, heading and order. `chunk_postings` is the inverted index over them (unique `(term, chunk_id)`), same idea as `postings`. |
+| Search (`/passages`, `/api/passages`) | BM25 over passages, with the same query syntax and filters (type, year, author, keyword, selected documents). With an embedding model configured it becomes hybrid: BM25 and cosine similarity fused by reciprocal rank fusion. Unchanged passages are never embedded again. |
+| Ask (`/ask`, `POST /api/ask`) | Retrieve passages, check there is enough evidence, then answer only from them. Without a language model the answer is made of sentences copied verbatim from the best passages, each with a number `[n]`. With one, the model writes the answer and every sentence is checked: a citation that does not exist is dropped, a quotation that is not in the cited passage is flagged, a sentence without a citation is marked unsupported. |
+| Evidence | `[n]` links to the passage; "Open this passage in context" shows it with its neighbours (`/doc/<id>/passage/<chunk>`); PDF sources also link to the file at the cited page (`#page=N`). |
+| "I cannot tell" | Evidence coverage = share of the question's terms (weighted by rarity; a word found nowhere in the corpus counts most) present in the best three passages. Below 50% the system says the answer cannot be established and shows the closest passages, labelled as not an answer. |
+| Follow-ups | "and the worst case?" or "why is it slow?" reuse the previous question's topic; a question that stands alone is never changed. History travels in the page form (at most 6 turns, 1,500 characters each, validated); nothing is stored on the server yet. |
+| Untrusted text | Documents are data. Passages go to a model inside delimiters, forged delimiters inside a document are removed, the system message says document text is never an instruction, all output is HTML-escaped, and a passage that looks like an instruction is flagged on the page. This reduces prompt-injection risk; it cannot remove it for every model. |
+
+```
+python passages.py reindex                 # build passages for documents that have none (needed once for an existing database)
+python passages.py ingest paper.pdf notes.docx --type report
+python passages.py search "outer race"
+python passages.py ask "What did the inspection find on turbine 6?"
+python evaluate.py --db docretrieval_demo  # measure retrieval and answer quality
+```
+
+### Measured quality
+
+`python evaluate.py` over `eval/qa_set.json` (14 answerable questions, 2 multi-document questions, 6 unanswerable ones) on the ten sample
+documents, BM25 only, no language model. Saved in `docs/eval_results.json`.
+
+| Metric | Result |
+|---|---|
+| Recall@5 (evidence passage in the top 5) | 1.00 |
+| MRR | 0.88 |
+| nDCG@5 | 0.91 |
+| Expected documents found, multi-document questions | 1.00 |
+| Citations whose quotation is inside the cited passage | 1.00 (28 checked) |
+| Answerable questions answered | 1.00 |
+| Unanswerable questions refused | 1.00 (6 of 6) |
+| Latency per question (local MongoDB) | mean 8.5 ms, 95th percentile 23.6 ms |
+
+Read these with care: the corpus is ten short documents and the question set is small and written by the developer, so the numbers show that
+the pipeline works and guard against regressions; they do not predict accuracy on a large or different collection. The 50% evidence threshold
+was chosen after looking at this question set (answerable questions scored 0.56 to 1.00, unanswerable ones 0.00 to 0.28), so the 6 of 6
+refusal figure is optimistic. Semantic and hybrid retrieval, the language-model path and OCR have **not** been measured: no embedding model, language model or OCR
+engine was available in the test environment. They are covered only by tests with stand-ins, never against a real service.
+
+Tests: `test_passages.py` (44: validation, extraction, chunking, index maintenance, filters, hybrid search with a stand-in embedder, citation
+checks, refusals, follow-ups, a stand-in language model including invented citations and quotations, malicious documents, ingestion jobs and
+rollback, the evaluation floor) and `test_webapp_passages.py` (22: pages, API, read-only mode, rate limiting, uploads through the form,
+escaping). Whole suite: 193 tests, all passing against a real MongoDB.
+
+## 11. Configuration, limits, cost and deployment
+
+**Environment variables** (template: `.env.example`; set real values only in Vercel or a local `.env`, which git ignores): `MONGO_URI`,
+`DOCRETRIEVAL_DB`, `READ_ONLY`, `MAX_UPLOAD_MB`, `MAX_PDF_PAGES`, and optionally `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_KEY` and
+`EMBED_BASE_URL` / `EMBED_MODEL` / `EMBED_API_KEY` for any OpenAI-compatible service (hosted, or local such as Ollama). Keys are read on the
+server only, are never sent to the browser and are left out of error messages.
+
+**Cost.** The default setup uses no paid AI service. Turning on a language model or embedding model costs whatever that provider charges; the
+answer response reports the token usage the provider returned. Embeddings are computed once per passage and reused when a document is re-indexed.
+
+**Limits to know about**
+
+* **No user accounts yet.** The public site is read-only and shared; anyone can ask questions about everything in it. Do not store private documents
+  in a database behind it. Accounts, private collections and per-user isolation (checked on every query, including passages and embeddings) are the next step.
+* Vercel functions accept request bodies of at most 4.5 MB, so large uploads must be made locally (`python passages.py ingest ...`) or with `READ_ONLY=0` on a host without that limit.
+* Processing is synchronous inside the request (no background worker): large files are slow, and the job record is written but not polled live.
+* Rate limiting (30 requests a minute per client address for asking and uploading) is kept in each server instance's memory, so on a serverless host it slows abuse without being a global quota. It trusts the `X-Forwarded-For` header set by the host.
+* OCR, chart and equation extraction, text-extraction preview before indexing, versioned comparison of two file versions, the research workspace
+  (structured paper summaries, literature table, research gaps) and DOCX/PDF export of research reports are **not built yet**.
+* Cross-language search needs a multilingual embedding model; no language other than English has been tested.
+* Embedding search compares the query with every stored vector in the chosen documents (up to 20,000), fine for thousands of passages; a vector index (for example Atlas Vector Search) is the next step for more.
+
+**Deploying this change safely.** Nothing here is pushed or deployed automatically. (1) Review the change locally (`python -m pytest -q`, then
+`python webapp.py --db docretrieval_demo`). (2) Commit to a branch, not `main`; Vercel builds a preview URL for the branch. (3) Build the passage index for the
+Atlas database once: `MONGO_URI=... python passages.py reindex`, or deploy with `READ_ONLY=0`, press "Build the passage index" on the Ask page, and switch back to `READ_ONLY=1`.
+(4) Check the preview, then merge to `main` to release. Adding passages does not change or delete existing documents.

@@ -9,10 +9,11 @@
 </head>
 <body>
 <header class="top"><div class="bar">
-  <a class="brand" href="{{ url_for('home') }}">Document Retrieval</a>
+  <a class="brand" href="{{ url_for('home') }}"><img class="logo" src="{{ url_for('static', filename='uestc_logo.png') }}" alt="UESTC logo" width="34" height="33">Document Retrieval</a>
   <nav>
     {% set ep = request.endpoint %}
     <a href="{{ url_for('home') }}" class="{{ 'on' if ep == 'home' }}">Search</a>
+    <a href="{{ url_for('ask') }}" class="{{ 'on' if ep in ('ask', 'passage', 'passage_search') }}">Ask</a>
     {% if not read_only %}<a href="{{ url_for('add') }}" class="{{ 'on' if ep == 'add' }}">Add</a>{% endif %}
     <a href="{{ url_for('compare') }}" class="{{ 'on' if ep == 'compare' }}">Compare</a>
     <a href="{{ url_for('graph') }}" class="{{ 'on' if ep in ('graph', 'duplicates') }}">Similarity</a>
@@ -23,9 +24,14 @@
   </nav>
   <span class="dbname">{{ "read-only · " if read_only }}db: {{ db_name }}</span>
 </div></header>
+<div class="study">For study purpose only &middot; UESTC database course, Experiment 5</div>
 <main>
 {% if msg %}<div class="msg" role="status">{{ msg }}</div>{% endif %}
 {% block body %}{% endblock %}
 </main>
+<footer class="foot">
+  <img class="logo" src="{{ url_for('static', filename='uestc_logo.png') }}" alt="" width="28" height="27">
+  <span>This is for study purpose only. University of Electronic Science and Technology of China (UESTC), Database course.</span>
+</footer>
 </body>
 </html>

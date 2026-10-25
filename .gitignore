@@ -7,3 +7,9 @@ downloads/
 .venv/
 ~$*
 downloads_bench/
+
+# Word and PowerPoint documents stay local (not pushed to GitHub)
+*.docx
+*.pptx
+*.dotx
+*.potx

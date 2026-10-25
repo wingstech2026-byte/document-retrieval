@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Passage from {{ d.title }}{% endblock %}
+{% block body %}
+<p class="small"><a href="{{ url_for('ask') }}">&larr; Ask the documents</a> &middot; <a href="{{ url_for('doc', doc_id=d._id) }}">Open the whole document</a></p>
+<h1><span class="tag t-{{ d.type }}">{{ d.type }}</span>{{ d.title }}</h1>
+<p class="muted">Evidence at <strong>{{ where }}</strong>{% if d.year %} &middot; {{ d.year }}{% endif %}{% if d.authors %} &middot; {{ d.authors|join(', ') }}{% endif %}</p>
+<div class="actions">
+  {% if pdf %}<a class="btn" href="{{ url_for('file', doc_id=d._id, inline=1) }}#page={{ p.page }}" target="_blank" rel="noopener">Open the PDF at page {{ p.page }}</a>{% endif %}
+  {% if d.file_id %}<a class="btn ghost" href="{{ url_for('file', doc_id=d._id) }}">Download the original file</a>{% endif %}
+</div>
+{% for c in context %}
+<article class="card src {{ 'cited' if c._id == p._id else 'around' }}">
+  <div class="srchead"><span class="muted small">{{ c.where }}{% if c.heading and c.page %} &middot; {{ c.heading }}{% endif %}</span>
+    {% if c._id == p._id %}<span class="badge">cited passage</span>{% else %}<span class="muted small">surrounding context</span>{% endif %}</div>
+  <blockquote class="passage">{{ c.marked|hl }}</blockquote>
+</article>
+{% endfor %}
+<p class="small muted">Passage id <code>{{ p._id }}</code>. The text above is exactly what was stored when the document was indexed.</p>
+{% endblock %}

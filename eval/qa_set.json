@@ -1,0 +1,31 @@
+{
+  "description": "Questions over the ten sample documents (sample_data.py). 'evidence' is a phrase the supporting passage must contain; 'docs' lists every document that should be retrieved for multi-document questions; unanswerable questions have no support in the corpus.",
+  "answerable": [
+    {"q": "How much faster was the adaptive layout than a tuned B-tree on point queries?", "doc": "pap-001", "evidence": "between 1.4 and 2.1 times faster"},
+    {"q": "Which shard key is recommended for insert-heavy logging collections?", "doc": "pap-002", "evidence": "hashed keys for insert-heavy logging collections"},
+    {"q": "By how much did chunk migration during peak load raise tail latency?", "doc": "pap-002", "evidence": "raised tail latency by roughly a quarter"},
+    {"q": "How did federated training change recall for the fault detector?", "doc": "pap-003", "evidence": "raising recall from 0.71 to 0.86"},
+    {"q": "When should dense embeddings be added to BM25 ranking?", "doc": "pap-004", "evidence": "otherwise add the dense signal"},
+    {"q": "What does claim 1 of the posting list compression patent describe?", "doc": "pat-001", "evidence": "dividing the identifiers into blocks"},
+    {"q": "How much does the delta coding invention reduce index size?", "doc": "pat-001", "evidence": "about forty percent"},
+    {"q": "What does the spring washer stack do in the vibration sensor mount?", "doc": "pat-002", "evidence": "predetermined clamping force"},
+    {"q": "How long did the replica set take to elect a new primary?", "doc": "rep-001", "evidence": "median of 4.8 seconds"},
+    {"q": "Were acknowledged writes lost during failover with retries enabled?", "doc": "rep-001", "evidence": "no acknowledged write was lost"},
+    {"q": "What did the inspection find on turbine 6?", "doc": "rep-002", "evidence": "early spalling on the outer race"},
+    {"q": "How many standard deviations above baseline flagged a turbine?", "doc": "rep-002", "evidence": "three standard deviations"},
+    {"q": "What material is the gearbox housing made of?", "doc": "drw-001", "evidence": "Material: cast iron"},
+    {"q": "How are the three server racks cabled together?", "doc": "drw-002", "evidence": "two independent paths"}
+  ],
+  "multi_document": [
+    {"q": "Which documents discuss vibration sensors on wind turbine gearboxes?", "docs": ["pap-003", "pat-002", "rep-002"]},
+    {"q": "What do the documents say about MongoDB replication and sharding?", "docs": ["pap-002", "rep-001"]}
+  ],
+  "unanswerable": [
+    "What is the capital of France?",
+    "Who won the 2022 football world cup?",
+    "What is the recommended dosage of ibuprofen for children?",
+    "How does quantum error correction work in superconducting qubits?",
+    "What is the melting point of the titanium alloy used in the housing?",
+    "What was the annual revenue of the archive project in 2023?"
+  ]
+}

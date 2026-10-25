@@ -1,0 +1,17 @@
+{
+  "k": 5,
+  "mode": "auto",
+  "answerable": 14,
+  "unanswerable": 6,
+  "multi_document": 2,
+  "recall_at_k": 1.0,
+  "mrr": 0.881,
+  "ndcg_at_k": 0.912,
+  "doc_recall_multi": 1.0,
+  "citation_correct": 1.0,
+  "citations_checked": 28,
+  "answered": 1.0,
+  "refused_unanswerable": 1.0,
+  "latency_ms_mean": 8.5,
+  "latency_ms_p95": 23.6
+}

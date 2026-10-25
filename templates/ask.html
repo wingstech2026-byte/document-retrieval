@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Ask the documents{% endblock %}
+{% block body %}
+<h1>Ask the documents</h1>
+<p class="muted">Answers are built only from passages found in the stored documents, and every statement points to the passage it came from.
+{% if generator == "quotations" %}No language model is configured, so the answer is made of <strong>direct quotations</strong>.
+{% else %}The answer is written by a language model and checked against the cited passages.{% endif %}</p>
+
+{% if pstats.chunks == 0 %}
+<div class="card err" role="alert"><strong>Nothing to search yet.</strong> The documents have not been split into passages.
+  {% if read_only %}Run <code>python passages.py reindex</code> against this database, or temporarily set <code>READ_ONLY=0</code> and press the button on this page.
+  {% else %}<form method="post" action="{{ url_for('reindex') }}" style="margin-top:8px"><button>Build the passage index</button></form>{% endif %}</div>
+{% elif pstats.documents_missing and not read_only %}
+<div class="msg">{{ pstats.documents_missing }} document(s) have no passages yet and cannot be searched here.
+  <form method="post" action="{{ url_for('reindex') }}" style="display:inline"><button class="ghost">Index them</button></form></div>
+{% endif %}
+
+{% if past %}
+<div class="card convo" aria-label="Earlier in this conversation">
+  {% for m in past %}<p class="turn {{ m.role }}"><span class="who">{{ "You" if m.role == "user" else "Answer" }}</span> {{ m.content }}</p>{% endfor %}
+</div>
+{% endif %}
+
+<form class="card" method="post" action="{{ url_for('ask') }}">
+  <input type="hidden" name="history" value="{{ history_json }}">
+  <label for="q">{{ "Follow-up question" if past else "Your question" }}</label>
+  <div class="askrow">
+    <input id="q" type="text" name="q" value="{{ q if error else '' }}" maxlength="{{ max_chars }}" required autofocus
+           placeholder="e.g. How long did the replica set take to elect a new primary?">
+    <button>Ask</button>
+  </div>
+  <div class="grid2" style="margin-top:10px">
+    <div><label for="type">Document type</label><select id="type" name="type"><option value="">All types</option>
+      {% for t in doc_types %}<option value="{{ t }}" {{ 'selected' if sel_type == t }}>{{ t }}</option>{% endfor %}</select></div>
+    <div><details><summary>Limit to selected documents{% if selected %} ({{ selected|length }}){% endif %}</summary>
+      <div class="pick">{% for x in all_docs %}<label class="chk"><input type="checkbox" name="d" value="{{ x._id }}" {{ 'checked' if x._id in selected }}> {{ x.title }}</label>{% endfor %}</div></details></div>
+  </div>
+  {% if past %}<p class="small muted" style="margin:8px 0 0">Short follow-ups such as “and the worst case?” reuse the topic of your previous question. <a href="{{ url_for('ask') }}">Start a new conversation</a></p>{% endif %}
+</form>
+
+{% if error %}<div class="msg err" role="alert">{{ error }}</div>{% endif %}
+
+{% if result %}
+  {% if result.supported %}
+  <div class="card answer" aria-live="polite">
+    <h2 style="margin-top:0">Answer</h2>
+    <p class="answertext">{% for s in result.segments %}<span class="seg k-{{ s.kind }}">{% if s.kind == "quote" %}&ldquo;{{ s.text }}&rdquo;{% else %}{{ s.text }}{% endif %}</span>{% for c in s.citations %}<a class="cite" href="#src-{{ c }}" title="Source {{ c }}">[{{ c }}]</a>{% endfor %}
+      {% if s.kind == "unsupported" %}<span class="badge warn" title="No cited passage supports this statement">unsupported</span>{% elif s.kind == "quote_unverified" %}<span class="badge warn" title="The quotation was not found in the cited passage">quotation not verified</span>{% endif %} {% endfor %}</p>
+    <p class="small muted">
+      {% if result.answer_mode == "extractive" %}<span class="badge">direct quotations</span> Sentences copied word for word from the documents.
+      {% else %}<span class="badge">AI-written</span> Summary generated from the cited passages; check the sources below.{% endif %}
+    </p>
+    {% for w in result.warnings %}<p class="small warnline">{{ w }}</p>{% endfor %}
+  </div>
+  {% else %}
+  <div class="card cannot" role="status">
+    <h2 style="margin-top:0">This cannot be established from the documents</h2>
+    <p>{{ result.reason }}</p>
+    <p class="small muted">No answer is given rather than a guess.{% if result.sources %} The closest passages are listed below only so you can judge for yourself; they are not an answer.{% endif %}</p>
+    {% for w in result.warnings %}<p class="small warnline">{{ w }}</p>{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if result.injection_suspected %}<div class="msg small">Some retrieved text looks like instructions to an AI system. It was treated as document content only and was not followed.</div>{% endif %}
+
+  {% if result.sources %}
+  <h2>{{ "Sources" if result.supported else "Closest passages (not an answer)" }}</h2>
+  {% for s in result.sources %}
+  <article class="card src" id="src-{{ s.n }}">
+    <div class="srchead"><span class="cite static">[{{ s.n }}]</span>
+      <a href="{{ url_for('doc', doc_id=s.doc_id) }}"><strong>{{ s.title }}</strong></a>
+      <span class="muted small">&middot; {{ s.where }}</span></div>
+    <blockquote class="passage">{{ s.marked|hl }}</blockquote>
+    <div class="actions">
+      <a class="btn ghost" href="{{ url_for('passage', doc_id=s.doc_id, chunk_id=s.chunk_id, q=result.retrieval_query) }}">Open this passage in context</a>
+      {% if s.pdf_page %}<a class="btn ghost" href="{{ url_for('file', doc_id=s.doc_id, inline=1) }}#page={{ s.page }}" target="_blank" rel="noopener">Open the PDF at page {{ s.page }}</a>{% endif %}
+    </div>
+  </article>
+  {% endfor %}
+  {% endif %}
+
+  <p class="small muted">Evidence coverage {{ (result.coverage * 100)|round|int }}% (share of the question's terms found in the best passages) &middot;
+    retrieval: {{ result.mode }}{% if not semantic %} (no embedding model configured){% endif %} &middot; {{ result.ms }} ms
+    {% if result.retrieval_query != result.question %}&middot; searched for: <em>{{ result.retrieval_query }}</em>{% endif %}</p>
+{% elif not error and not past %}
+  <div class="card empty"><p><strong>Try a question</strong></p>
+    <p class="small">&ldquo;Which shard key is recommended for insert-heavy logging collections?&rdquo;<br>&ldquo;What did the inspection find on turbine 6?&rdquo;<br>&ldquo;What is the capital of France?&rdquo; (the documents cannot answer this, and the system will say so)</p></div>
+{% endif %}
+{% endblock %}

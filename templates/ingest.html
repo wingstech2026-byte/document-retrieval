@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ "Upload results" if results is not none else "Recent uploads" }}{% endblock %}
+{% block body %}
+{% if results is not none %}
+<h1>Upload results</h1>
+<p class="muted">Each file goes through: uploaded &rarr; extracting text &rarr; indexing &rarr; ready. A file that fails is reported here and leaves nothing behind.</p>
+<div class="card">
+<table>
+  <tr><th>File</th><th>Status</th><th>Details</th></tr>
+  {% for r in results %}
+  <tr>
+    <td>{{ r.filename }}</td>
+    <td><span class="badge st-{{ r.status }}">{{ {"ready": "ready for search", "duplicate": "duplicate, skipped", "failed": "failed"}[r.status] }}</span></td>
+    <td>{% if r.status == "ready" %}<a href="{{ url_for('doc', doc_id=r.doc_id) }}">{{ r.title }}</a> &middot; {{ r.message }}{% if r.pages %} &middot; {{ r.pages }} page(s){% endif %}
+      {% elif r.status == "duplicate" %}{{ r.message }} &middot; <a href="{{ url_for('doc', doc_id=r.doc_id) }}">open it</a>
+      {% else %}{{ r.message }}{% endif %}
+      {% for w in r.warnings %}<br><span class="small warnline">{{ w }}</span>{% endfor %}</td>
+  </tr>{% endfor %}
+</table></div>
+<div class="actions"><a class="btn" href="{{ url_for('add') }}">Upload more</a><a class="btn ghost" href="{{ url_for('ask') }}">Ask the documents</a><a class="btn ghost" href="{{ url_for('jobs') }}">Recent uploads</a></div>
+{% else %}
+<h1>Recent uploads</h1>
+<div class="card">
+{% if jobs %}<table><tr><th>When (UTC)</th><th>File</th><th>State</th><th>Details</th></tr>
+  {% for j in jobs %}<tr><td class="small">{{ j.created.strftime("%Y-%m-%d %H:%M") }}</td><td>{{ j.filename }}</td>
+    <td><span class="badge st-{{ 'duplicate' if j.duplicate else ('ready' if j.state == 'ready' else j.state) }}">{{ "duplicate" if j.duplicate else j.state }}</span></td>
+    <td>{% if j.doc_id %}<a href="{{ url_for('doc', doc_id=j.doc_id) }}">{{ j.doc_id }}</a>{% endif %}{% if j.chunks %} &middot; {{ j.chunks }} passages{% endif %}{% if j.error %}{{ j.error }}{% endif %}</td></tr>{% endfor %}
+</table>{% else %}<div class="empty">No uploads yet.</div>{% endif %}</div>
+{% endif %}
+{% endblock %}

@@ -9,19 +9,23 @@ The page code only calls DocumentStore from docretrieval.py; all data stays in M
 from __future__ import annotations
 
 import argparse
+import collections
 import csv
 import io
 import json
 import math
 import os
 import re
+import time
 from urllib.parse import quote
 
 from flask import Flask, Response, jsonify, redirect, render_template, request, url_for
 from markupsafe import Markup, escape
 
 import docretrieval as dr
+import passages as ps
 
+READ_ONLY_POSTS = {"ask", "api_ask"}      # questions change nothing, so a read-only site still answers them
 PAGE_CHARS = 1000
 PER_PAGE = 10
 MAX_GRAPH_NODES = 80
@@ -31,6 +35,53 @@ DUP_THRESHOLD = 0.6          # a newly added document this similar to an existin
 INLINE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "text/plain"}
 CITE_FORMATS = {"bibtex": ("bib", "application/x-bibtex"), "ris": ("ris", "application/x-research-info-systems"),
                 "apa": ("txt", "text/plain")}
+
+
+class TooMany(dr.DocError):
+    """The client is asking too often."""
+
+
+class RateLimiter:
+    """At most `limit` calls per `window` seconds for each client. It lives in the memory of one
+    server process: on a serverless host each instance keeps its own count, so it slows abuse but is
+    not a global quota (see README, section 11)."""
+
+    def __init__(self, limit: int = 30, window: float = 60.0, max_clients: int = 5000):
+        self.limit, self.window, self.max_clients = limit, window, max_clients
+        self.calls: dict[str, collections.deque] = {}
+
+    def check(self, key: str, now: float | None = None) -> None:
+        now = time.monotonic() if now is None else now
+        if len(self.calls) > self.max_clients:
+            self.calls.clear()
+        q = self.calls.setdefault(key, collections.deque())
+        while q and now - q[0] > self.window:
+            q.popleft()
+        if len(q) >= self.limit:
+            raise TooMany(f"too many requests; try again in {int(self.window - (now - q[0])) + 1} seconds")
+        q.append(now)
+
+
+def _mark_terms(text: str, terms: set) -> str:
+    """Wrap words that match the query in ** markers (the `hl` filter turns them into <mark>)."""
+    def one(m):
+        w = m.group()
+        core = re.sub(r"^\W+|\W+$", "", w)
+        return w.replace(core, "**" + core + "**", 1) if core and set(dr.tokenize(core)) & terms else w
+    return re.sub(r"\S+", one, text)
+
+
+def _clean_history(raw) -> list[dict]:
+    """Conversation turns sent by the browser are untrusted: keep only well-formed, short ones."""
+    try:
+        data = json.loads(raw) if isinstance(raw, str) and raw else (raw or [])
+    except ValueError:
+        return []
+    out = []
+    for m in (data if isinstance(data, list) else [])[-6:]:
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str):
+            out.append({"role": m["role"], "content": m["content"][:1500]})
+    return out
 
 
 def _int(name: str) -> int | None:
@@ -73,6 +124,14 @@ def create_app(store: dr.DocumentStore, read_only: bool = False) -> Flask:
     app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024
     app.config["STORE"] = store
     app.config["READ_ONLY"] = read_only
+    passages = ps.PassageIndex(store, ps.embedder_from_env(), create_indexes=not read_only)
+    chat = ps.chat_from_env()
+    limiter = RateLimiter()
+    app.config["PASSAGES"] = passages
+
+    def throttle() -> None:
+        client = (request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote_addr or "?")
+        limiter.check(client)
 
     @app.template_filter("hl")
     def highlight(text: str) -> Markup:
@@ -95,13 +154,14 @@ def create_app(store: dr.DocumentStore, read_only: bool = False) -> Flask:
     @app.before_request
     def block_writes():
         """Read-only mode (public deployments): no uploads, deletes or sample loading."""
-        if read_only and (request.method not in ("GET", "HEAD") or request.endpoint == "add"):
+        if read_only and (request.method not in ("GET", "HEAD") and request.endpoint not in READ_ONLY_POSTS
+                          or request.endpoint == "add"):
             return render_template("error.html", message="This site is read-only: documents can be searched, "
                                    "read, compared and downloaded, but not added or deleted.", code=403), 403
 
     @app.errorhandler(dr.DocError)
     def doc_error(e):
-        code = 404 if isinstance(e, dr.NotFound) else 400
+        code = 404 if isinstance(e, dr.NotFound) else 429 if isinstance(e, TooMany) else 400
         if request.path.startswith("/api/"):
             return jsonify({"error": str(e)}), code
         return render_template("error.html", message=str(e), code=code), code
@@ -198,6 +258,7 @@ def create_app(store: dr.DocumentStore, read_only: bool = False) -> Flask:
                 pass
             store.add_document(**s)
             n += 1
+        passages.backfill()
         return redirect(url_for("home", msg=f"Loaded {n} sample documents."))
 
     # ---- one document ---------------------------------------------------------------
@@ -250,6 +311,102 @@ def create_app(store: dr.DocumentStore, read_only: bool = False) -> Flask:
         return redirect(url_for("home", msg=f"Deleted {doc_id} ({r['postings_removed']} index entries"
                                             f"{', original file' if r['file_removed'] else ''} removed)."))
 
+    # ---- ask the documents: grounded answers with citations ------------------------------
+    def doc_label(chunk) -> str:
+        if chunk.get("page"):
+            return f"page {chunk['page']}"
+        return f"section \"{chunk['heading']}\"" if chunk.get("heading") else f"passage {chunk['ordinal'] + 1}"
+
+    @app.route("/ask", methods=["GET", "POST"])
+    def ask():
+        src = request.form if request.method == "POST" else request.args
+        question = (src.get("q") or "").strip()
+        doc_ids = [d for d in src.getlist("d") if d] or None
+        doc_type = src.get("type") or None
+        history = _clean_history(src.get("history")) if request.method == "POST" else []
+        past, result, error = list(history), None, None
+        if question:
+            try:
+                throttle()
+                result = ps.ask(passages, question, doc_ids=doc_ids, history=history, chat=chat, doc_type=doc_type)
+                history = (history + [{"role": "user", "content": question},
+                                      {"role": "assistant", "content": result["answer"] or "(no supported answer)"}])[-6:]
+            except dr.DocError as e:
+                error = str(e)
+        if result:
+            terms = set(result["terms"])
+            for s_ in result["sources"]:
+                s_["marked"] = _mark_terms(s_["text"], terms)
+                s_["where"] = doc_label({"page": s_["page"], "heading": s_["heading"],
+                                         "ordinal": int(s_["chunk_id"].rsplit(":", 1)[1])})
+                d_ = store.documents.find_one({"_id": s_["doc_id"]}, {"content_type": 1})
+                s_["pdf_page"] = bool(s_["page"] and d_ and d_.get("content_type") == "application/pdf")
+        page = render_template("ask.html", q=question, result=result, error=error, history=history, past=past,
+                               history_json=json.dumps(history), all_docs=store.list_documents(limit=500),
+                               selected=set(doc_ids or []), sel_type=doc_type or "", pstats=passages.stats(),
+                               generator=("language model" if chat else "quotations"), semantic=bool(passages.embedder),
+                               max_chars=ps.MAX_QUESTION_CHARS)
+        return page, (429 if error and error.startswith("too many") else 400 if error else 200)
+
+    @app.get("/doc/<doc_id>/passage/<path:chunk_id>")
+    def passage(doc_id, chunk_id):
+        p = passages.get_passage(chunk_id)
+        if p["passage"]["doc_id"] != doc_id:
+            raise dr.NotFound(f"no such passage: {chunk_id}")
+        terms = set(dr.tokenize(request.args.get("q") or ""))
+        for c in p["context"]:
+            c["marked"] = _mark_terms(c["text"], terms)
+            c["where"] = doc_label(c)
+        d = p["document"]
+        return render_template("passage.html", d=d, p=p["passage"], context=p["context"], where=doc_label(p["passage"]),
+                               pdf=d.get("content_type") == "application/pdf" and bool(p["passage"].get("page")))
+
+    @app.get("/passages")
+    def passage_search():
+        q = (request.args.get("q") or "").strip()
+        mode = request.args.get("mode") or "auto"
+        res = None
+        if q:
+            throttle()
+            res = passages.search(q, k=20, mode=mode if mode in ("auto", "bm25", "semantic", "hybrid") else "auto")
+            for h in res["hits"]:
+                h["where"] = doc_label(h)
+                h["marked"] = _mark_terms(h["text"], set(res["terms"]))
+        return render_template("passages.html", q=q, res=res, mode=mode, semantic=bool(passages.embedder),
+                               pstats=passages.stats())
+
+    # ---- validated multi-file upload with job status --------------------------------------
+    @app.post("/ingest")
+    def ingest():
+        throttle()
+        files = [f for f in request.files.getlist("files") if f and f.filename]
+        if not files:
+            raise dr.DocError("choose at least one file")
+        if len(files) > 20:
+            raise dr.DocError("upload at most 20 files at once")
+        f = request.form
+        year = (f.get("year") or "").strip()
+        try:
+            year = int(year) if year else None
+        except ValueError:
+            raise dr.DocError("year must be a whole number")
+        common = dict(doc_type=f.get("type") or "report", year=year,
+                      authors=dr._split_multi([f.get("authors", "")], r";|\n"),
+                      keywords=dr._split_multi([f.get("keywords", "")], r",|\n"))
+        results = [ps.ingest_file(passages, up.filename, up.read(),
+                                  title=(f.get("title") or None) if len(files) == 1 else None, **common) for up in files]
+        return render_template("ingest.html", results=results, jobs=None)
+
+    @app.get("/jobs")
+    def jobs():
+        rows = list(passages.jobs.find({}).sort("created", -1).limit(50))
+        return render_template("ingest.html", results=None, jobs=rows)
+
+    @app.post("/reindex")
+    def reindex():
+        r = passages.backfill()
+        return redirect(url_for("ask", msg=f"Indexed {r['chunks']} passages from {r['documents']} documents."))
+
     # ---- add ------------------------------------------------------------------------
     @app.route("/add", methods=["GET", "POST"])
     def add():
@@ -268,6 +425,7 @@ def create_app(store: dr.DocumentStore, read_only: bool = False) -> Flask:
                 file_bytes=data, filename=up.filename if data is not None else None)
         except (dr.DocError, ValueError) as e:
             return render_template("add.html", form=f, error=str(e)), 400
+        passages.index_document(r["doc_id"])
         note = "Document stored."
         twin = store.related(r["doc_id"], 1)
         if twin and twin[0]["similarity"] >= DUP_THRESHOLD:
@@ -348,6 +506,32 @@ def create_app(store: dr.DocumentStore, read_only: bool = False) -> Flask:
     @app.get("/api")
     def api_docs():
         return render_template("api.html", base=request.url_root.rstrip("/"))
+
+    @app.post("/api/ask")
+    def api_ask():
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or not isinstance(body.get("question"), str):
+            raise dr.DocError('send JSON like {"question": "...", "doc_ids": ["pap-001"], "history": []}')
+        throttle()
+        ids_ = body.get("doc_ids")
+        if ids_ is not None and not (isinstance(ids_, list) and all(isinstance(i, str) for i in ids_)):
+            raise dr.DocError("doc_ids must be a list of document ids")
+        return jsonify(ps.ask(passages, body["question"], doc_ids=ids_ or None,
+                              history=_clean_history(body.get("history")), chat=chat, doc_type=body.get("type") or None))
+
+    @app.get("/api/passages")
+    def api_passages():
+        q = (request.args.get("q") or "").strip()
+        if not q:
+            raise dr.DocError("give a query: /api/passages?q=failover")
+        throttle()
+        return jsonify(passages.search(q, k=min(_int("k") or 10, 50), mode=request.args.get("mode") or "auto"))
+
+    @app.get("/api/passage/<path:chunk_id>")
+    def api_passage(chunk_id):
+        p = passages.get_passage(chunk_id)
+        return jsonify({"passage": p["passage"],
+                        "document": {k: p["document"].get(k) for k in ("_id", "title", "type", "year", "authors")}})
 
     @app.get("/api/search")
     def api_search():

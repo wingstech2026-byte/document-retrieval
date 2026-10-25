@@ -1,4 +1,5 @@
 pymongo>=4.6
 flask>=3.0
-# optional: text extraction from PDF files added with --file
+# text extraction from PDF and Word files (upload pipeline, passages.py)
 pypdf>=4
+python-docx>=1.1

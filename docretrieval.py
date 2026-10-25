@@ -477,6 +477,7 @@ class DocumentStore:
         if not doc:
             raise NotFound(f"no such document: {doc_id}")
         removed = self.postings.delete_many({"doc_id": doc_id}).deleted_count
+        self._remove_passages(doc_id)
         file_removed = False
         if doc.get("file_id") is not None:
             try:
@@ -488,6 +489,16 @@ class DocumentStore:
         self.meta.update_one({"_id": "corpus"}, {"$inc": {"n": -1, "total_len": -doc["length"]}})
         self._vocab = None
         return {"doc_id": doc_id, "postings_removed": removed, "file_removed": file_removed}
+
+    def _remove_passages(self, doc_id: str) -> None:
+        """Drop the passages (see passages.py) of a document, keeping their corpus counters right."""
+        chunks = self.db["chunks"]
+        old = list(chunks.aggregate([{"$match": {"doc_id": doc_id}},
+                                     {"$group": {"_id": None, "n": {"$sum": 1}, "total": {"$sum": "$length"}}}]))
+        self.db["chunk_postings"].delete_many({"doc_id": doc_id})
+        chunks.delete_many({"doc_id": doc_id})
+        if old:
+            self.meta.update_one({"_id": "chunks"}, {"$inc": {"n": -old[0]["n"], "total_len": -old[0]["total"]}})
 
     # ---- retrieval --------------------------------------------------------
     def search(self, query: str, doc_type: str | None = None, year_from: int | None = None,

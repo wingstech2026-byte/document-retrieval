@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Search passages{% endblock %}
+{% block body %}
+<h1>Search passages</h1>
+<p class="muted">Finds the individual passages (about 100 words each) that match, not just whole documents. Supports the same syntax as the main search:
+<code>"exact phrase"</code>, <code>-excluded</code>, <code>type:report</code>, <code>year:2020..2023</code>.</p>
+<form class="card" method="get" action="{{ url_for('passage_search') }}">
+  <div class="askrow"><input type="text" name="q" value="{{ q }}" aria-label="Search passages" placeholder="e.g. outer race spalling" required>
+    <select name="mode" aria-label="Retrieval mode">
+      <option value="auto" {{ 'selected' if mode == 'auto' }}>Automatic</option>
+      <option value="bm25" {{ 'selected' if mode == 'bm25' }}>Keywords (BM25)</option>
+      {% if semantic %}<option value="semantic" {{ 'selected' if mode == 'semantic' }}>Meaning (embeddings)</option>
+      <option value="hybrid" {{ 'selected' if mode == 'hybrid' }}>Hybrid</option>{% endif %}
+    </select><button>Search</button></div>
+  {% if not semantic %}<p class="small muted" style="margin:8px 0 0">Meaning-based search is off: no embedding model is configured (see README, section 11).</p>{% endif %}
+</form>
+{% if res %}
+  <p class="muted small">{{ res.hits|length }} passage(s) &middot; {{ res.mode }} &middot; {{ res.ms }} ms{% for f in res.filters %} &middot; <span class="chip flt">{{ f }}</span>{% endfor %}</p>
+  {% for h in res.hits %}
+  <article class="card src">
+    <div class="srchead"><a href="{{ url_for('doc', doc_id=h.doc_id) }}"><strong>{{ h.title }}</strong></a>
+      <span class="muted small">&middot; {{ h.where }} &middot; score {{ h.score }}{% if h.bm25 is not none %} &middot; BM25 {{ h.bm25 }}{% endif %}{% if h.semantic is not none %} &middot; similarity {{ h.semantic }}{% endif %}</span></div>
+    <blockquote class="passage">{{ h.marked|hl }}</blockquote>
+    <div class="actions"><a class="btn ghost" href="{{ url_for('passage', doc_id=h.doc_id, chunk_id=h.chunk_id, q=q) }}">Open in context</a></div>
+  </article>
+  {% else %}<div class="card empty">No passage matches. Try fewer or different words.</div>{% endfor %}
+{% elif pstats.chunks == 0 %}
+  <div class="card empty">No passages are indexed yet. Run <code>python passages.py reindex</code>.</div>
+{% endif %}
+{% endblock %}

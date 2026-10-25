@@ -12,9 +12,12 @@ body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-ap
 a{color:var(--accent)} a:hover{text-decoration:none}
 header.top{background:var(--surface);border-bottom:1px solid var(--line)}
 .bar{max-width:1080px;margin:0 auto;padding:12px 16px;display:flex;flex-wrap:wrap;gap:8px 22px;align-items:center}
-.brand{font-weight:700;color:var(--ink);text-decoration:none;font-size:1.05rem}
+.brand{display:inline-flex;align-items:center;gap:10px;font-weight:700;color:var(--ink);text-decoration:none;font-size:1.05rem}
 nav{display:flex;flex-wrap:wrap;gap:4px 16px;flex:1}
 nav a{color:var(--muted);text-decoration:none;padding:2px 0} nav a:hover,nav a.on{color:var(--ink);border-bottom:2px solid var(--accent)}
+.logo{display:block;height:auto}
+.study{background:var(--surface);border-bottom:1px solid var(--line);color:var(--muted);text-align:center;font-size:.82rem;padding:4px 16px}
+.foot{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;border-top:1px solid var(--line);color:var(--muted);font-size:.85rem;padding:16px;text-align:center}
 .dbname{color:var(--muted);font-size:.85rem}
 main{max-width:1080px;margin:0 auto;padding:20px 16px 60px}
 h1{font-size:1.5rem;margin:.2em 0 .6em} h2{font-size:1.15rem;margin:1.4em 0 .5em}
@@ -71,3 +74,20 @@ svg.chart .n-paper,svg .n-paper{fill:var(--paper)} svg.chart .n-patent{fill:var(
 svg.graph .n-author{fill:var(--accent)}
 .barrow{display:grid;grid-template-columns:minmax(0,9rem) 1fr 2rem;gap:10px;align-items:center;margin:6px 0;font-size:.92rem}
 details summary{cursor:pointer;color:var(--muted);margin-top:8px}
+
+/* ask / passages / upload */
+.askrow{display:flex;gap:10px;flex-wrap:wrap} .askrow input[type=text]{flex:1;min-width:14rem} .askrow select{width:auto}
+.convo .turn{margin:.3em 0} .convo .who{font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-right:6px;font-weight:700}
+.pick{max-height:14rem;overflow:auto;border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin-top:6px;background:var(--bg)}
+.pick .chk{padding:2px 0}
+.answer{border-left:5px solid var(--accent)} .cannot{border-left:5px solid var(--danger)}
+.answertext{font-size:1.05rem;line-height:1.7}
+.seg.k-quote{font-family:Georgia,"Times New Roman",serif} .seg.k-unsupported,.seg.k-quote_unverified{text-decoration:underline dotted var(--danger)}
+a.cite,.cite.static{font-size:.78rem;font-weight:700;vertical-align:super;margin:0 3px 0 1px;text-decoration:none;color:var(--accent)}
+a.cite:hover,a.cite:focus-visible{text-decoration:underline}
+.badge{display:inline-block;font-size:.72rem;font-weight:700;border:1px solid var(--accent);color:var(--accent);border-radius:4px;padding:0 6px;margin-right:4px}
+.badge.warn,.badge.st-failed{border-color:var(--danger);color:var(--danger)} .badge.st-duplicate{border-color:var(--muted);color:var(--muted)}
+.warnline{color:var(--danger)}
+.src{scroll-margin-top:12px} .src:target{outline:2px solid var(--accent)} .src.cited{border-left:5px solid var(--accent)} .src.around{opacity:.8}
+.srchead{display:flex;flex-wrap:wrap;gap:6px;align-items:baseline;margin-bottom:6px}
+blockquote.passage{margin:0;padding:8px 12px;border-left:3px solid var(--line);background:var(--bg);border-radius:0 6px 6px 0;white-space:pre-wrap}
